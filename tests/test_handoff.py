@@ -108,3 +108,18 @@ def test_every_turn_is_logged_for_the_report(tmp_path):
     session = C.ChatSession(workspace=tmp_path, llm=Model(AIMessage(content="hi")), hooks=hooks)
     session.turn(msgs("hello there"))
     assert session.turn_log == [{"no": 1, "user": "hello there", "outcome": "answered", "files": []}]
+
+
+def test_a_long_session_reads_in_hours_and_ends_at_the_last_turn(tmp_path):
+    """Live 2026-11-14: 'last session 1258 min': the file's time had moved with the rename."""
+    import json as _json
+    from app.core import handoff as HO
+    assert HO.duration(52) == "52 min" and HO.duration(150) == "2.5 h" and HO.duration(None) == ""
+    rec = tmp_path / "chat-1.jsonl"
+    rec.write_text("".join(_json.dumps(r) + "\n" for r in (
+        {"t": 100.0, "kind": "turn_start", "turn": 1}, {"t": 160.0, "kind": "turn_end", "turn": 1},
+        {"t": 200.0, "kind": "turn_start", "turn": 2}, {"t": 4600.0, "kind": "turn_end", "turn": 2},
+        {"t": 9e9, "kind": "signal", "of_turn": 2})), encoding="utf-8")
+    assert HO.last_turn_t(rec) == 4600.0 and HO.last_turn_t(tmp_path / "none.jsonl") is None
+    line = HO.startup_line([], tmp_path, 150, tmp_path / ".codemitra" / "reports" / "r.md")
+    assert "last session 2.5 h" in line

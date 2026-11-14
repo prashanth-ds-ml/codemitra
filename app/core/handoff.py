@@ -39,6 +39,29 @@ def turns_from_record(record: Path) -> list[dict]:
     return [turns[n] for n in sorted(turns)]
 
 
+def duration(minutes: int | None) -> str:
+    """'52 min', '2.5 h' (live 2026-11-14: "last session 1258 min" read badly)."""
+    if minutes is None:
+        return ""
+    return f"{minutes} min" if minutes < 90 else f"{minutes / 60:.1f} h"
+
+
+def last_turn_t(record: Path | None) -> float | None:
+    """When the last turn in a chat record ended. The file's own time moves when anything touches the file later
+    (live 2026-11-14: the rename moved the folder and a 22-turn evening read as "1258 min")."""
+    last = None
+    try:
+        for line in Path(record).read_text(encoding="utf-8").splitlines():
+            if '"turn_end"' in line:
+                try:
+                    last = float(json.loads(line).get("t") or 0) or last
+                except ValueError:
+                    pass
+    except (OSError, TypeError):
+        return None
+    return last
+
+
 def latest_record(workspace: Path) -> Path | None:
     runs = Path(workspace) / ".codemitra" / "runs"
     found = sorted(runs.glob("chat-*.jsonl"), key=lambda p: p.stat().st_mtime) if runs.is_dir() else []
@@ -124,7 +147,7 @@ def build(*, reason: str, workspace: Path, turns: list[dict], laptop: str, summa
     if kaggle:
         used = kaggle.get("session_min")
         facts = " · ".join(x for x in (
-            f"used {used} min" if used is not None else "",
+            f"used {duration(used)}" if used is not None else "",
             f"{kaggle['left_h']:.1f} h left this week" if kaggle.get("left_h") is not None else "") if x)
         if facts:
             lines.append(f"- **Kaggle:** {facts}")
@@ -161,7 +184,7 @@ def startup_line(turns: list[dict], workspace: Path, session_min: int | None, re
     """E-107: Kaggle ended while CodeMitra was closed: one line at start-up, the full report stays in its file.
     '☁ Kaggle ended while CodeMitra was closed · last session 111 min, 30 turns, no files changed · report: …'"""
     files = sorted({_rel(f, workspace) for t in turns for f in t.get("files", [])})
-    parts = [f"last session {session_min} min" if session_min is not None else "last session",
+    parts = [f"last session {duration(session_min)}" if session_min is not None else "last session",
              f"{len(turns)} turn{'s' if len(turns) != 1 else ''}"]
     if files:
         named = ", ".join(files[:3]) + (f" +{len(files) - 3}" if len(files) > 3 else "")

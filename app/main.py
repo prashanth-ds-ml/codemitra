@@ -3145,10 +3145,12 @@ def _chat():
         all_turns = chat.turn_log if turns is None else turns
         if startup and st.get("started"):  # the session ended while CodeMitra was closed: its record's last write
             rec = handoff.latest_record(ws_path)
-            try:
-                end = rec.stat().st_mtime if rec else None
-            except OSError:
-                end = None
+            end = handoff.last_turn_t(rec)  # the last turn's own time, not the file's (live 2026-11-14)
+            if end is None:
+                try:
+                    end = rec.stat().st_mtime if rec else None
+                except OSError:
+                    end = None
             session_min = int((end - st["started"]) / 60) if end and end > st["started"] else None
         facts = dict(reason=reason, workspace=ws_path, turns=all_turns,
                      laptop=f"{model} at {num_ctx // 1024}K" + (f" ({note})" if note else ""),

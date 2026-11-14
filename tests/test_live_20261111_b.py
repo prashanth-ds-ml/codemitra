@@ -121,7 +121,7 @@ def test_the_screen_shows_the_last_turns_the_file_keeps_all(tmp_path):
 def test_start_up_gets_one_line_naming_changed_files(tmp_path):
     report = tmp_path / ".codemitra" / "reports" / "kaggle-ended-1.md"
     line = HO.startup_line(_turns(30), tmp_path, 111, report)
-    assert line == ("☁ Kaggle ended while CodeMitra was closed · last session 111 min, 30 turns, no files changed · "
+    assert line == ("☁ Kaggle ended while CodeMitra was closed · last session 1.9 h, 30 turns, no files changed · "
                     "report in .codemitra/reports/")
     changed = HO.startup_line(_turns(2, files=[str(tmp_path / "game.py")]), tmp_path, None, report)
     assert "last session, 2 turns, 1 file changed: game.py" in changed
