@@ -126,8 +126,9 @@ def test_a_copy_that_is_not_a_clone_points_to_the_releases(tmp_path):
 
 
 def test_the_command_exists():
-    from typer.testing import CliRunner
+    """Checked on the command itself: CI colours the help, which splits '--check' with escape codes."""
+    import inspect
 
-    from app.main import cli
-    out = CliRunner().invoke(cli, ["update", "--help"]).output
-    assert "--check" in out
+    from app import main
+    assert "update" in [c.name for c in main.cli.registered_commands]
+    assert "check" in inspect.signature(main.cmd_update).parameters
