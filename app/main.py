@@ -3994,6 +3994,16 @@ def _chat():
 
         if user_input.strip().startswith("/"):
             unknown = user_input.strip().split()[0]
+            _rest = user_input.strip()[len(unknown):].strip()
+            if unknown.lower() in ("/codemitra", "/mitra") and _rest:  # live 2026-11-14: "/codemitra kaggle start"
+                _first = "/" + _rest.split()[0].lower()
+                if any(c[0].split()[0] == _first for c in _COMMAND_HELP):
+                    typed_ahead = "/" + _rest  # the chat's own command, ready in the input box: press Enter
+                    _say(f"In the chat that is `/{_rest}`: it is in the input box, press Enter.")
+                else:
+                    _say(f"`codemitra {_rest}` is a terminal command: run it in another terminal (this chat can stay "
+                         "open).")
+                continue
             _say(f"Unknown command `{unknown}`. Type `/help` for the list.")
             continue
 

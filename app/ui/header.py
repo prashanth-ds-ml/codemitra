@@ -80,7 +80,7 @@ def header(*, model: str, folder: str, context: int | None = None, placement: st
 
 def tips() -> Text:
     t = Text("  ", style="m.dim")
-    for i, (key, what) in enumerate((("/", "commands"), ("!", "shell"), ("/good /bad", "teach CodeMitra"),
+    for i, (key, what) in enumerate((("/", "commands"), ("!", "shell"), ("+ / -", "rate an answer"),
                                      ("/role", "switch role"), ("ctrl+c", "stop"), ("exit", "quit"))):
         if i:
             t.append("  ·  ", style="m.faint")
