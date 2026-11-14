@@ -1,5 +1,6 @@
 """D-083: `codemitra setup` does everything after `git clone`, checks before it acts, never undoes your choices, and
 says plainly what only you can do (a Kaggle account, your phone)."""
+import os
 from pathlib import Path
 
 import pytest
@@ -27,19 +28,39 @@ class Fake:
     def which(self, name):
         return f"/bin/{name}" if name in self.have else None
 
+    real_winget = False  # True: like the real installer, the exe lands on disk and this terminal's PATH stays old
+
     def run(self, args, timeout=0, stream=False):
         self.ran.append(args)
         if args[0] == "nvidia-smi":
             return (0, self.gpu) if self.gpu else (1, "not found")
+        if args[0] == "ollama" and self.real_winget and "ollama" not in self.have:
+            return 1, "[WinError 2] The system cannot find the file specified"
+        if args[0].endswith("ollama.exe"):
+            args = ["ollama", *args[1:]]
         if args[:2] == ["ollama", "list"]:
             return 0, "NAME ID SIZE MODIFIED\n" + self.models
         if args[:2] == ["ollama", "pull"]:
             self.models += f"{args[2]} x 1GB now\n"
             return 0, ""
         if args[0] == "winget":
-            self.have.add("ollama")
-            return 0, "installed"
+            if not self.real_winget:
+                self.have.add("ollama")
+                return 0, "installed"
+            exe = Path(W._known_ollama_path(M8) or Path(os.environ["LOCALAPPDATA"], "Programs", "Ollama", "ollama.exe"))
+            if exe.is_file():
+                return 1, "Found an existing package already installed. No available upgrade found."
+            exe.parent.mkdir(parents=True, exist_ok=True)
+            exe.write_text("")
+            return 0, "Successfully installed"
         return 0, ""
+
+
+@pytest.fixture(autouse=True)
+def _no_real_ollama(tmp_path, monkeypatch):
+    """The install folder is a temp one (this laptop has a real Ollama there), and PATH changes are undone."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
 
 
 M8 = W.Machine("windows", 24.0, 8.0, "RTX 4060")
@@ -67,6 +88,38 @@ def test_ollama_missing_is_installed_with_winget_after_asking():
     r = W.step_ollama(f.io(), M8, auto=False)
     assert r.ok and any(a[0] == "winget" and "Ollama.Ollama" in a for a in f.ran)
     assert "Install Ollama now? (Y/n)" in f.asked[0]
+
+
+def _fresh_windows(monkeypatch, models=""):
+    """Issue #10's machine: Windows with winget, no Ollama, a PATH that never changes inside this run."""
+    monkeypatch.setattr(config, "load_last_model", lambda: "")
+    monkeypatch.setattr(config, "save_last_model", lambda m: None)
+    monkeypatch.setattr(W, "OLLAMA_SETTINGS", {})          # no setx on the real machine
+    f = Fake(have=("winget",), models=models)
+    f.real_winget = True
+    return f, f.io()
+
+
+def test_a_new_install_not_yet_on_path_still_downloads_the_model(monkeypatch):
+    """E-127 (issue #10), run 1: winget installed Ollama, this terminal's PATH did not know it, the pull failed."""
+    f, io = _fresh_windows(monkeypatch)
+    assert W.step_ollama(io, M8, auto=True).ok
+    r = W.step_model(io, M8, auto=True)
+    assert r.ok, r
+    pulls = [a for a in f.ran if a[1:2] == ["pull"]]
+    assert pulls and pulls[0][0].endswith("ollama.exe")
+    assert any("open a new terminal" in s for s in f.said)
+    assert os.path.dirname(pulls[0][0]) in os.environ["PATH"].split(os.pathsep)
+
+
+def test_ollama_on_disk_is_never_installed_again(monkeypatch):
+    """E-127 (issue #10), run 2: winget ran again, said 'already installed', and the download page opened."""
+    f, io = _fresh_windows(monkeypatch, models=f"{W.SMALL} x 1GB now\n")
+    exe = Path(os.environ["LOCALAPPDATA"], "Programs", "Ollama", "ollama.exe")
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert W.step_ollama(io, M8, auto=True).ok and W.step_model(io, M8, auto=True).ok
+    assert not any(a[0] == "winget" for a in f.ran) and not f.opened
 
 
 def test_saying_no_to_ollama_explains_what_to_do():

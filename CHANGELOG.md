@@ -2,6 +2,15 @@
 
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
+## [0.8.2] - 2026-11-14 · setup finds a fresh Ollama
+- **Setup on a fresh Windows machine (E-127, issue #10):** after winget installs Ollama, the terminal that runs the
+  setup does not see the new PATH, so the model download failed, and a second run tried to install Ollama again and
+  opened the download page. The setup now finds Ollama in its install folder and uses it from there for the rest of
+  the run; it never installs an Ollama that is already on disk, and it tells you to open a new terminal so `ollama`
+  works there too.
+- In the chat, `/codemitra <command>` fills in the chat's own `/<command>`; the tip line shows `+ / - rate an answer`.
+- A Kaggle session's length ends at its last turn and long ones read in hours (it showed "1258 min" after the rename).
+
 ## [0.8.1] - 2026-11-14 · one-command setup, share your sessions
 - **One command after cloning (D-083):** `setup.ps1` (Windows) / `setup.sh` (macOS, Linux) installs uv and CodeMitra,
   then `codemitra setup` does the rest, asking before each step: Ollama (winget / Homebrew / the official script) and

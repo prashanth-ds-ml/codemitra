@@ -59,6 +59,7 @@ class IO:
     ollama_up: Callable[[], bool] = None
     sleep: Callable[[float], None] = time.sleep
     results: list = field(default_factory=list)
+    ollama: str = "ollama"       # Ollama's command for this run: its full path when PATH does not know it yet
 
     def __post_init__(self):
         self.run = self.run or _run
@@ -127,8 +128,22 @@ def pick_model(m: Machine) -> tuple[str, str]:
 
 
 # ── 1. Ollama ────────────────────────────────────────────────────────────────────────────────────────────────────
+def find_ollama(io: IO, m: Machine) -> str | None:
+    """Ollama's command, or None. An install made by this setup is on disk before this terminal's PATH knows it
+    (E-127): then it is used by its full path and its folder is added to this run's PATH."""
+    if io.which("ollama"):
+        return "ollama"
+    exe = _known_ollama_path(m)
+    if exe:
+        folder = os.path.dirname(exe)
+        if folder not in os.environ.get("PATH", "").split(os.pathsep):
+            os.environ["PATH"] = folder + os.pathsep + os.environ.get("PATH", "")
+    return exe
+
+
 def step_ollama(io: IO, m: Machine, auto: bool) -> Result:
-    if not io.which("ollama"):
+    exe = find_ollama(io, m)
+    if not exe:
         io.say("Ollama runs the AI model on your machine. It is not installed yet.")
         if not yes(io, "Install Ollama now?", auto=auto):
             return Result("Ollama", False, f"not installed: get it from {OLLAMA_DOWNLOAD}, then run `codemitra setup` again")
@@ -142,11 +157,14 @@ def step_ollama(io: IO, m: Machine, auto: bool) -> Result:
             code, out = io.run(["sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh"], CMD_TIMEOUT_S, True)
         else:
             code, out = 1, "no package manager"
-        if code != 0 or not (io.which("ollama") or _known_ollama_path(m)):
+        exe = find_ollama(io, m)  # winget's "already installed" exits non-zero: the exe on disk decides
+        if not exe:
             io.open_url(OLLAMA_DOWNLOAD)
             return Result("Ollama", False, f"could not install it here ({out[:120]}); the download page is open: "
                                            "install it, then run `codemitra setup` again")
-        io.say("✓ Ollama installed")
+        io.say("✓ Ollama installed" + ("" if exe == "ollama" else
+                                       " (open a new terminal so the `ollama` command works there too)"))
+    io.ollama = exe
     if m.os == "windows":
         missing = {k: v for k, v in OLLAMA_SETTINGS.items() if os.environ.get(k) != v}
         if missing and yes(io, "Turn on Ollama's memory saver (halves the memory long chats need)?", auto=auto):
@@ -158,8 +176,7 @@ def step_ollama(io: IO, m: Machine, auto: bool) -> Result:
         io.say("Tip: Ollama uses half the memory for long chats with " +
                " and ".join(f"{k}={v}" for k, v in OLLAMA_SETTINGS.items()) + " in its environment.")
     if not io.ollama_up():
-        exe = io.which("ollama") or _known_ollama_path(m) or "ollama"
-        _start_ollama(exe)
+        _start_ollama(io.ollama)
         for _ in range(20):
             if io.ollama_up():
                 break
@@ -188,7 +205,7 @@ def _start_ollama(exe: str) -> None:
 
 # ── 2. the model ─────────────────────────────────────────────────────────────────────────────────────────────────
 def installed_models(io: IO) -> set[str]:
-    code, out = io.run(["ollama", "list"], 60)
+    code, out = io.run([io.ollama, "list"], 60)
     if code != 0:
         return set()
     names = {line.split()[0] for line in out.splitlines()[1:] if line.strip()}
@@ -212,7 +229,7 @@ def step_model(io: IO, m: Machine, auto: bool, chosen: str = "") -> Result:
     io.say(f"Model: {model} ({size} download) · {why}.")
     if not yes(io, f"Download {model} now?", auto=auto):
         return Result("Model", False, f"not downloaded: run `ollama pull {model}` when you are ready")
-    code, _ = io.run(["ollama", "pull", model], PULL_TIMEOUT_S, True)
+    code, _ = io.run([io.ollama, "pull", model], PULL_TIMEOUT_S, True)
     if code != 0:
         return Result("Model", False, f"the download stopped: run `ollama pull {model}` again (it resumes)")
     config.save_last_model(model)
