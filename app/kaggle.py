@@ -88,6 +88,9 @@ def client():
     except (SystemExit, OSError) as exc:  # older kaggle versions authenticate on import
         raise KaggleError(_CREDS_HELP) from exc
     api = KaggleApi()
+    # E-129: the library reads KAGGLE_CONFIG_DIR once, at import, and keeps its values in one dict shared by every
+    # client: a key saved (or a folder set) after the first import was ignored. Read them fresh, per client.
+    api.config_dir, api.config, api.config_values = str(key_path().parent), str(key_path()), {}
     import contextlib
     import io
     quiet = io.StringIO()  # the library prints its own 15-line sign-in help (twice): ours is shorter and CodeMitra's

@@ -37,8 +37,11 @@ Options: `--yes` takes every default without asking, `--model qwen3.5:latest` pi
 5. Optional: `codemitra kaggle setup` ([Kaggle guide](KAGGLE.md)) and `codemitra share --setup` ([sharing](SHARING.md)).
 
 ## Update, remove
-- **Update:** `cd codemitra && git pull`, then restart `codemitra` (the install follows the folder). Run
-  `codemitra setup` again if the release notes say so.
+- **Update:** when a new release is out, the chat says so in one line at start (it asks GitHub once a day; nothing
+  about you is sent). Run `codemitra update`: it pulls the new version into your `codemitra` folder, shows what
+  changed, and the next `codemitra` you start runs it. It never overwrites files you changed there, and it tells you
+  when the install must run again. `codemitra update --check never` turns the daily check off. (Before 0.8.3:
+  `cd codemitra && git pull` once.)
 - **Remove:** `uv tool uninstall codemitra`. Your sessions and settings are in `~/.codemitra/`; delete that folder too
   if you want them gone. Models: `ollama rm qwen3.5:4b`.
 

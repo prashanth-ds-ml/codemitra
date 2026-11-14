@@ -318,3 +318,20 @@ def test_readiness_cases(monkeypatch, tmp_path, fake_quota):
         raise kaggle.KaggleError(kaggle._CREDS_HELP)
 
     assert "does not work any more" in kaggle.readiness(api_factory=bad)["problem"]
+
+
+def test_the_key_folder_is_read_per_client_not_at_import(monkeypatch, tmp_path):
+    """E-129: the library fixes its key folder at its first import; a folder set later was ignored, so a key from
+    the old folder still signed in (and the no-key steps never showed)."""
+    from kaggle.api.kaggle_api_extended import KaggleApi
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "kaggle.json").write_text('{"username": "someone", "key": "0123456789abcdef"}', encoding="utf-8")
+    monkeypatch.setattr(KaggleApi, "config_dir", str(old))
+    monkeypatch.setattr(KaggleApi, "config", str(old / "kaggle.json"))
+    monkeypatch.setenv("KAGGLE_CONFIG_DIR", str(tmp_path / "new"))
+    (tmp_path / "new").mkdir()
+    for k in ("KAGGLE_USERNAME", "KAGGLE_KEY", "KAGGLE_API_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    with pytest.raises(kaggle.KaggleError):
+        kaggle.client()

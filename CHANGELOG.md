@@ -2,6 +2,17 @@
 
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
+## [0.8.3] - 2026-11-14 · codemitra update, installs in the project's Python
+- **Updates reach you (D-084):** when a new release is out, the chat says so in one line at start (it asks GitHub at
+  most once a day, 2 seconds at most, silent offline; nothing about you is sent). `codemitra update` pulls it into
+  your `codemitra` folder and shows what changed; the next `codemitra` runs it. It never overwrites files you changed
+  there, and says when the install must run again. `codemitra update --check never` turns the check off.
+- **Installs land where they are used (E-128, issue #11):** `pip install`, `python -m pip` and `playwright` now run in
+  the project's Python; a project with no usable Python gets its own `.venv` (made with uv, with pytest) on the first
+  install. `node`, `npx` and `playwright` are allowed by default. A refused command is not retried in other forms:
+  CodeMitra tells you the exact `! <command>` to run it yourself.
+- A Kaggle key saved during a run is used (E-129).
+
 ## [0.8.2] - 2026-11-14 · setup finds a fresh Ollama
 - **Setup on a fresh Windows machine (E-127, issue #10):** after winget installs Ollama, the terminal that runs the
   setup does not see the new PATH, so the model download failed, and a second run tried to install Ollama again and

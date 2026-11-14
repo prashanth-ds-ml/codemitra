@@ -9,5 +9,6 @@ def _isolated_harness(tmp_path, monkeypatch):
     # nor write to the user's ~/.codemitra (the central store, D-041, mirrors every record written in a test)
     monkeypatch.setenv("CODEMITRA_HOME", str(tmp_path / "codemitra-home"))
     monkeypatch.setenv("CODEMITRA_NO_MIGRATE", "1")  # D-080: tests never move real folders
+    monkeypatch.setenv("CODEMITRA_NO_UPDATE_CHECK", "1")  # D-084: nor ask GitHub for releases
     for old in ("MITRA_HOME", "MITRA_HARNESS"):
         monkeypatch.delenv(old, raising=False)

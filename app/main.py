@@ -2313,6 +2313,32 @@ def cmd_setup(
 cli.command("setup")(cmd_setup)
 
 
+def cmd_update(
+    check: str = typer.Option("", "--check", help="daily | never: the once-a-day check for a new release."),
+) -> None:
+    """Get the newest CodeMitra (D-084): `git pull` in the folder it was installed from, then what changed. Your own
+    edits there are never overwritten."""
+    from app import update as U
+
+    if check:
+        if check not in ("daily", "never"):
+            console.print(Text("--check is daily or never", style="m.err"))
+            raise typer.Exit(2)
+        U.save_settings(check=check)
+        console.print(Text(f"  ✓ new-release check: {check}", style="m.tool"))
+        return
+    console.print(Text(f"  pulling the newest CodeMitra into {U.SOURCE} …", style="m.faint"))
+    ok, msg = U.update()
+    head, _, notes = msg.partition("\n\n")
+    console.print(Text(("  ✓ " if ok else "  ✗ ") + head, style="m.tool" if ok else "m.err"))
+    if notes:
+        console.print(Markdown(notes))
+    raise typer.Exit(0 if ok else 1)
+
+
+cli.command("update")(cmd_update)
+
+
 def cmd_cases(
     action: str = typer.Argument("draft", help="draft (new /bad turns), review (keep / edit / drop) or list."),
     no_coach: bool = typer.Option(False, "--no-coach", help="Draft from the template only (no Claude call)."),
@@ -2975,6 +3001,13 @@ def _chat():
                           ram_free_gb=getattr(_fit, "free_ram_gb", None),
                           vram_free_gb=_gpu.free_gib if _gpu else None,
                           remote=cfg.get("remote") or "")  # e.g. "kaggle": not this machine's energy (D-060)
+    except Exception:
+        pass
+    try:  # D-084: a newer release is one dim line, at most one GitHub call a day (2 s, silent offline)
+        from app import update as _update
+        _new = _update.notice()
+        if _new:
+            console.print(Text("    " + _new, style="m.info"))
     except Exception:
         pass
     console.print(ui.header.tips())

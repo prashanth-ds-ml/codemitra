@@ -31,7 +31,7 @@ from app.policy import Policy, Scope, Action, load_policy
 _DEFAULT_COMMANDS: set[str] = {
     "python", "python3", "pip", "pip3",
     "git", "npm", "node", "npx",
-    "uvicorn", "gunicorn",
+    "uvicorn", "gunicorn", "playwright",
     "pytest", "ruff", "mypy", "black", "isort",
     "make", "cargo", "go",
     # read-only directory listing (safe on all platforms)
@@ -359,12 +359,52 @@ def _model_command_args(command: str, cwd: str) -> list[str]:
     command a bare `python` found CodeMitra's private Python ("No module named pytest", 2026-11-06 session).
     """
     args = _split_command(command)
-    if args and args[0].lower() in ("python", "python3", "py", "python.exe"):
+    if not args:
+        return args
+    exe = re.sub(r"\.exe$", "", pathlib.Path(args[0]).name.lower())
+    is_python = exe in ("python", "python3", "py")
+    root = pathlib.Path(_config.root_workspace or cwd)
+    if exe in ("pip", "pip3", "playwright") or (is_python and args[1:3] == ["-m", "pip"]):
+        # E-128: an install and its use land in one Python. pip on PATH installed into another Python than the one
+        # `python` ran, and CodeMitra's own Python has no pip: so the project's Python runs pip (and playwright),
+        # and a project with none gets its own .venv first.
+        py = project_venv_python(root, create=exe != "playwright")
+        if py:
+            rest = args[3:] if is_python else args[1:]
+            return [py, "-m", "pip" if exe != "playwright" else "playwright", *rest]
+    if is_python:
         from app.core.tools import project_python
 
-        root = _config.root_workspace or cwd
-        args[0] = project_python(pathlib.Path(root))
+        args[0] = project_python(root)
     return args
+
+
+def project_venv_python(root: pathlib.Path, create: bool = True) -> str | None:
+    """The Python a project's installs go into (E-128): its venv, or a `python` on PATH that tests already use; else
+    (only CodeMitra's own Python, which has no pip) a new `<project>/.venv` with pip and pytest, made with uv."""
+    import sys
+
+    from app.core.tools import project_python
+
+    py = project_python(root)
+    if py != sys.executable:
+        return py
+    if not create:
+        return None
+    venv = root / ".venv"
+    uv = shutil.which("uv")
+    steps = ([[uv, "venv", "--seed", str(venv)]] if uv else [[sys.executable, "-m", "venv", str(venv)]])
+    try:
+        for step in steps:
+            subprocess.run(step, cwd=root, capture_output=True, timeout=180)
+        py = project_python(root)
+        if py == sys.executable:
+            return None
+        subprocess.run([uv, "pip", "install", "--python", py, "pytest"] if uv else [py, "-m", "pip", "install", "pytest"],
+                       cwd=root, capture_output=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return py
 
 
 def _confirm_command(command: str, cwd: str) -> str | None:
@@ -589,7 +629,10 @@ def execute(
 
     # Permission check (model-run commands only)
     if not typed_by_user and (err := _check_executable(command)):
-        return ShellResult(command=command, cwd=resolved_cwd, exit_code=1, output_lines=[f"✗ Permission denied: {err}"])
+        # E-128: other forms of a refused command are refused too; the user can run it, so say exactly what to run
+        return ShellResult(command=command, cwd=resolved_cwd, exit_code=1, output_lines=[
+            f"✗ Permission denied: {err}. Do not try other forms of it. Tell the user it was refused and that they can "
+            f"run it themselves by typing:  ! {command}"])
 
     # Inline code from the model is never run without the user seeing it (E-003), even in auto mode.
     if not typed_by_user and _config.confirm_fn is None and runs_inline_code(command):

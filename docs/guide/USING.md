@@ -41,7 +41,8 @@ or Kaggle) and a memory check (**✓** fine; **⚠ / ✗** not enough free memor
 | `/plan <task>` · `/do <task>` · `/run plan.md 4` | plan first / skip planning / build a plan unattended |
 | `! <command>` | run a shell command yourself |
 
-In the terminal (not inside the chat): `codemitra setup` (setup again), `codemitra kaggle start|stop|status`,
+In the terminal (not inside the chat): `codemitra update` (the newest release), `codemitra setup` (setup again),
+`codemitra kaggle start|stop|status`,
 `codemitra share --push` ([guide](SHARING.md)), `codemitra dashboard` (a local page with your sessions: what worked,
 what failed), `codemitra score` (the measuring set: how good it is today, kept in `results/scores.jsonl`),
 `codemitra --help` for everything.
@@ -59,5 +60,6 @@ CodeMitra's learning round uses these to improve.
 
 ## What stays on your machine
 Everything CodeMitra records stays in `~/.codemitra/` (sessions, traces for the dashboard, settings). Nothing is
-uploaded, except: web searches you ask for, MCP servers you use (git, GitHub, docs lookups; `/mcp` lists them), your
+uploaded, except: a once-a-day check for a new release (a plain request to GitHub; `codemitra update --check
+never` stops it), web searches you ask for, MCP servers you use (git, GitHub, docs lookups; `/mcp` lists them), your
 prompts and code while you use Kaggle ([guide](KAGGLE.md)), and sessions you choose to share ([guide](SHARING.md)).

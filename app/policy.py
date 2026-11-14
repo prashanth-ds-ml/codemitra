@@ -184,6 +184,25 @@ rules:
     description: "Allow uvicorn"
     priority: 10
 
+  # E-128: web projects (node, npx) and the browser check (playwright runs in the project's Python)
+  - action: allow
+    scope: command
+    pattern: "node"
+    description: "Allow node"
+    priority: 10
+
+  - action: allow
+    scope: command
+    pattern: "npx"
+    description: "Allow npx"
+    priority: 10
+
+  - action: allow
+    scope: command
+    pattern: "playwright"
+    description: "Allow playwright"
+    priority: 10
+
   - action: deny
     scope: command
     pattern: "*"
