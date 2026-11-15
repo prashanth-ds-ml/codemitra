@@ -55,10 +55,43 @@ def test_the_checklist_labels_and_none_is_left_out(tmp_path):
     assert "When you are not sure, none." in llm.prompts[0] and "Pair 1:" in llm.prompts[0]
 
 
-def test_a_bad_reply_labels_nothing(tmp_path):
+def test_a_bad_reply_is_a_failure_and_marks_nothing_done(tmp_path):
+    """Review: an unusable reply was recorded as 'asked', so those turns were never labelled."""
+    import pytest
+    from tests.test_live_20261113_b import _rows, _session
+    from tests.test_phased import Heard
     rec = _record(tmp_path / "chat-1.jsonl", TURNS)
-    assert SIG.model_labels(Labeller("I think they were happy."), rec)[0] == []
-    assert SIG.model_labels(Labeller('[{"n": 99, "verdict": "unhappy"}]'), rec)[0] == []
+    for reply in ("I think they were happy.", ""):
+        with pytest.raises(ValueError):
+            SIG.model_labels(Labeller(reply), rec)
+    assert SIG.model_labels(Labeller('[{"n": 99, "verdict": "unhappy"}]'), rec)[0] == []   # valid, out of range
+    (tmp_path / "ws").mkdir()
+    s = _session(tmp_path / "ws", Heard())
+    _record(s.rec.path, TURNS)
+    assert s.label_turns(Labeller("not json")) == 0
+    assert any(r["kind"] == "model_labels_failed" for r in _rows(s)) and len(SIG.unlabelled_pairs(s.rec.path)) == 3
+
+
+def test_only_the_last_session_of_the_days_record_is_labelled(tmp_path):
+    """Review: one file holds a whole day and every session counts turns from 1: pairs crossed sessions."""
+    rec = tmp_path / "chat-1.jsonl"
+    rows = [{"kind": "session"}, {"kind": "turn_start", "turn": 1, "user": "a"},
+            {"kind": "turn_end", "turn": 1, "text": "A"}, {"kind": "turn_start", "turn": 2, "user": "b"},
+            {"kind": "turn_end", "turn": 2, "text": "B"}, {"kind": "turn_start", "turn": 3, "user": "old three"},
+            {"kind": "session"}, {"kind": "turn_start", "turn": 1, "user": "x"},
+            {"kind": "turn_end", "turn": 1, "text": "X"}, {"kind": "turn_start", "turn": 2, "user": "y"},
+            {"kind": "turn_end", "turn": 2, "text": "Y"}]
+    rec.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    assert [(p["turn"], p["answer"], p["next"]) for p in SIG.unlabelled_pairs(rec)] == [(1, "X", "y")]
+
+
+def test_the_models_labels_are_marked_as_the_models(tmp_path):
+    from tests.test_live_20261113_b import _rows, _session
+    from tests.test_phased import Heard
+    s = _session(tmp_path, Heard())
+    _record(s.rec.path, TURNS)
+    s.label_turns(Labeller('[{"n": 1, "verdict": "unhappy", "why": "x"}]'))
+    assert [r["author"] for r in _rows(s) if r["kind"] == "signal"] == ["mitra"]
 
 
 def test_the_chat_writes_them_once_and_the_learning_round_reads_them(tmp_path):

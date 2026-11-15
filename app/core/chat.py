@@ -642,6 +642,7 @@ class ChatSession:
         self.llm, self.hooks, self.mode, self.num_ctx = llm, hooks, mode, num_ctx
         self.harness = harness if harness is not None else H.load()
         self.ws = T.Workspace(Path(workspace), read_only=())  # in the chat the user may ask for test edits
+        self.read_outside = True  # must-have 12; off for score runs (nobody to ask)
         self.ws.before_read_outside = self._before_read_outside  # must-have 12 (every path, explain included)
         self.ws.spill_dir = self.ws.root / ".codemitra" / "output"
         # every step of every turn, scrubbed, one file per day: follow a session live, replay it later (D-022)
@@ -710,9 +711,13 @@ class ChatSession:
     def label_turns(self, llm) -> int:
         """Must-have 9: at exit, the model labels the turns the rules left open (one call); returns how many it
         labelled. Each label is a signal row like the rules' own, marked source "model"."""
-        labels, asked = SIG.model_labels(llm, self.rec.path)
+        try:
+            labels, asked = SIG.model_labels(llm, self.rec.path)
+        except ValueError as exc:  # unusable reply: recorded, and nothing is marked done (asked again next exit)
+            self.rec.write("model_labels_failed", error=str(exc)[:300])
+            return 0
         for lb in labels:
-            self.signal(lb["signal"], of_turn=lb["turn"], why=lb["why"], auto=True, source="model")
+            self.signal(lb["signal"], of_turn=lb["turn"], why=lb["why"], auto=True, source="model", author="mitra")
         if asked:
             self.rec.write("model_labels", turns=asked, labelled=len(labels))
         return len(labels)
@@ -745,7 +750,7 @@ class ChatSession:
         of = self.turn_no if of_turn is None else of_turn
         if not of:
             return
-        self.rec.write("signal", of_turn=of, signal=name, author="user", **info)
+        self.rec.write("signal", of_turn=of, signal=name, **{"author": "user", **info})  # the model's own labels: "mitra"
 
     def _start_row(self, user: str) -> dict:
         """The turn_start fields every path shares (D-068 step 0 adds kind, path, backend, thinking, notes)."""
@@ -878,9 +883,12 @@ class ChatSession:
     def _before_read_outside(self, path: str) -> bool:
         """Must-have 12: a file outside the project is read only after the user says yes, in every mode (auto too);
         once per folder per session. Recorded either way."""
+        if not getattr(self, "read_outside", True):
+            return False
         ok = bool(self.hooks.confirm(f"Read outside the project: {path}",
-                                     "CodeMitra only reads it (never changes it); yes covers this folder for the "
-                                     "rest of the session.", f"Let CodeMitra read {path}?"))
+                                     "CodeMitra only reads it (never changes it); yes covers the files directly in "
+                                     "this folder for the rest of the session (not its subfolders; in your home "
+                                     "folder or a drive root, only this file).", f"Let CodeMitra read {path}?"))
         self.rec.write("outside_read", turn=self.turn_no, path=path, allowed=ok, author="user")
         return ok
 
@@ -1327,7 +1335,6 @@ class ChatSession:
         self.approve_all = False
         self.ws.journal = res.journal
         self.ws.before_write = self._before_write
-        self.ws.before_read_outside = self._before_read_outside
         specs = H.apply_tools(tool_specs(self.mode), self.harness)
         if self.allowed_tools is not None:  # the role's tool set (routing)
             specs = [s for s in specs if s["name"] in self.allowed_tools]

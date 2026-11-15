@@ -49,3 +49,12 @@ def test_a_full_harness_stays_under_budget():
         total = (model_view.estimate_tokens(H.apply_prompt(prompt, h))
                  + model_view.estimate_tokens(model_view._specs_text(H.apply_tools(specs, h))))
         assert total <= model_view.BUDGET_TOKENS, f"{name}: {total} tokens with a full harness"
+
+
+
+def test_a_text_over_the_limit_is_cut_at_a_word_and_said(capsys):
+    """Review: lowering MAX_TOOL_CHARS cut old tool texts mid-word, silently."""
+    from app.core import harness as H
+    h = H._clean(H.Harness(version=4, tools={"read_file": "word " * 100}))
+    assert h.tools["read_file"].endswith("word…") and len(h.tools["read_file"]) <= H.MAX_TOOL_CHARS
+    assert "shortened to fit the prompt budget: tool text read_file" in capsys.readouterr().err

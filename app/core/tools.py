@@ -52,12 +52,14 @@ class Workspace:
     def read_path(self, rel: str) -> Path:
         """A path to READ: inside the project as `path()`; outside it only after the user says yes (read-only,
         must-have 12). Secret files are never read, inside or out."""
+        raw = (rel or "").strip().strip("\"'")
         try:
+            if raw.startswith("~") and callable(self.before_read_outside):
+                raise ToolError("a home path")  # path() would read '~/x' as a folder named ~ in the project
             full = self.path(rel)
         except ToolError:
             if not callable(self.before_read_outside):
                 raise
-            raw = (rel or "").strip().strip("\"'")
             p = Path(os.path.expanduser(raw))
             full = (p if p.is_absolute() else self.root / p).resolve()
             if self._inside(full) is not None:
@@ -66,13 +68,17 @@ class Workspace:
                 raise ToolError(f"'{raw}' looks like a secret (keys, tokens, passwords): CodeMitra never reads it.") \
                     from None
             if not full.exists():
-                raise ToolError(f"'{raw}' does not exist.") from None
+                raise ToolError(f"'{raw}' does not exist." + self.suggest(raw)) from None
+            # a yes covers the files directly in that folder, never its subfolders; in the home folder or a drive
+            # root only that one file (review: one yes in ~ opened every project and AppData)
             folder = full if full.is_dir() else full.parent
-            if not any(folder == a or a in folder.parents for a in self.allowed_outside):
+            broad = folder == Path.home().resolve() or folder == Path(folder.anchor)
+            key = full if broad else folder
+            if key not in self.allowed_outside:
                 if not self.before_read_outside(str(full)):
                     raise ToolError(f"The user did not allow reading {full} (outside the project). Work with the "
                                     "project's files, or ask them for what you need.") from None
-                self.allowed_outside.add(folder)
+                self.allowed_outside.add(key)
             return full
         return full
 
@@ -196,10 +202,20 @@ def package_info(ws: Workspace, name: str) -> str:
     name = (name or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,80}", name):
         raise ToolError("Give a package or module name, for example 'pygame' or 'fastapi.testclient'.")
+    top = name.split(".")[0].replace("-", "_")
+    own = [f for f in (ws.root / f"{top}.py", ws.root / top / "__init__.py") if f.is_file()]
+    if own:  # review: importing the project's own module runs its code (a game window, file writes) in a read tool
+        return f"'{name}' is this project's own code ({ws.rel(own[0])}): read_file it instead."
     py = project_python(ws.root)
-    try:
-        p = subprocess.run([py, "-c", _PKG_SCRIPT, name], cwd=ws.root, capture_output=True, text=True,
-                           timeout=PKG_TIMEOUT_S, encoding="utf-8", errors="replace")
+    if py == sys.executable and top not in getattr(sys, "stdlib_module_names", ()):
+        # review: CodeMitra's private Python is not the project's; its packages would mislead
+        return (f"This project has no Python of its own yet, so nothing is installed for it. `pip install {top}` "
+                "makes the project's .venv and installs it there.")
+    import tempfile
+    try:  # run outside the project folder, so only installed packages (and the standard library) are imported
+        with tempfile.TemporaryDirectory() as away:
+            p = subprocess.run([py, "-c", _PKG_SCRIPT, name], cwd=away, capture_output=True, text=True,
+                               timeout=PKG_TIMEOUT_S, encoding="utf-8", errors="replace")
         info = json.loads((p.stdout or "").strip().splitlines()[-1])
     except (OSError, subprocess.TimeoutExpired, ValueError, IndexError) as exc:
         raise ToolError(f"Could not ask the project's Python ({py}) about '{name}': {exc}") from None

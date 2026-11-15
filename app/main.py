@@ -1456,7 +1456,7 @@ def _build_logs_reply(workspace: str, target: str = "summary") -> str:
         state = "present" if path.exists() else "missing"
         lines.append(f"- **{key}:** `{filename}` · {state}")
     lines.append("")
-    lines.append("Use `agent logs <history|session|trace|decisions|errors|tasks|plan>` for one artifact.")
+    lines.append("Use `codemitra logs <history|session|trace|decisions|errors|tasks|plan>` for one artifact.")
     return "\n".join(lines)
 
 
@@ -3520,6 +3520,7 @@ def _chat():
             ))
             _rebuild_dashboard(quiet=True)  # the page always shows every session so far (D-041)
             if signals_mod.unlabelled_pairs(chat.rec.path):  # must-have 9: what the rules left open, one call
+                console.print(Text("  noting how the answers went (ctrl+c skips) …", style="m.faint"))
                 try:
                     _n = chat.label_turns(_reply_llm())
                     if _n:
@@ -4101,7 +4102,7 @@ def _chat():
             if _want != bsession.kind:
                 (_to_remote if _want == backend_mod.REMOTE else _to_laptop)(
                     backend_mod.why(_want, session_mode, chat.role))
-        elif backend_mod.route(session_mode, chat.role) == backend_mod.REMOTE and not (
+        elif _hstate != "offline" and backend_mod.route(session_mode, chat.role) == backend_mod.REMOTE and not (
                 architecture == "phased" and chat.role == "chat" and not force_kind):
             _maybe_offer_kaggle()  # phased chat: only after a turn that worked (below), never for talk (D-074)
 

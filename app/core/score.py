@@ -233,6 +233,7 @@ class Runner:
         self.records.mkdir(parents=True, exist_ok=True)
         s.rec.path = self.records / f"{case_id}.jsonl"   # inside the store: kept for the coach, never mirrored
         s.backend_kind, s.thinking = self.backend, False
+        s.read_outside = False  # a score case never reads outside its workspace: nobody is there to ask (review)
         box["s"] = s
         return s
 

@@ -458,7 +458,8 @@ def improve_chat(*, proposer, make_runner: Callable[[H.Harness, Path], S.Runner]
             out.append(passes(run_score(cats, runner=arms[arm], model=model, cwd=cwd, only=again,
                                         on_case=line(label), results=results)))
     categories = {c["id"]: c["category"] for c in base.get("cases", [])}
-    targets = {f["id"] for f in failures}
+    # the failures the rule was proposed from, among the cases the judge runs; a queued coach rule has none (review)
+    targets = set() if queued else {f["id"] for f in failures if f.get("category") in cats}
     keep, reason, detail = decide(base_runs, cand_runs, categories, targets, min_gain)
     entry.update(base=base["score"], candidate=cand["score"], result="kept" if keep else "dropped", reason=reason,
                  gate=detail, records=str(runs))

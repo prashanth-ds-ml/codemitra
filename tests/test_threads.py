@@ -137,3 +137,13 @@ def test_old_thread_files_without_history_still_load(tmp_path):
     T.save({"slug": "old", "title": "Old", "said": "y"}, tmp_path)
     assert [h["said"] for h in T.load(tmp_path)[0]["history"]] == ["x"]
     assert not list(tmp_path.glob("*.tmp"))
+
+
+
+def test_a_history_line_without_a_date_is_kept(tmp_path):
+    """Review: an old version saved with no 'updated' was written as '- - · said: ...' and dropped next time."""
+    (tmp_path / "t.md").write_text("---\ntitle: T\nproject: -\nupdated: \n---\nSaid: first\nDecided: -\nOpen: -\n",
+                                   encoding="utf-8")
+    T.save({"slug": "t", "title": "T", "said": "second"}, tmp_path)
+    T.save({"slug": "t", "title": "T", "said": "third"}, tmp_path)
+    assert [h["said"] for h in T.load(tmp_path)[0]["history"]] == ["first", "second"]

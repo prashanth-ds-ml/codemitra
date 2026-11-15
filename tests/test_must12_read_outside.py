@@ -41,12 +41,13 @@ def test_a_yes_reads_it_read_only_and_names_it_by_its_full_path(two):
     assert (other / "notes.md").read_text(encoding="utf-8") == "line one\nline two\n"
 
 
-def test_asked_once_per_folder_and_its_subfolders(two):
+def test_asked_once_per_folder_and_again_for_a_subfolder(two):
     ws, other, asked = two
     T.read_file(ws, str(other / "notes.md"))
-    T.read_file(ws, str(other / "sub" / "more.md"))
     T.list_files(ws, str(other))
-    assert len(asked) == 1
+    assert len(asked) == 1                                       # the same folder: asked once
+    T.read_file(ws, str(other / "sub" / "more.md"))
+    assert len(asked) == 2                                       # review: a yes never opens the folders below
 
 
 def test_a_no_is_respected_and_said(two):
@@ -79,3 +80,43 @@ def test_the_chat_asks_in_every_mode_and_records_it(tmp_path):
     assert "hello" in T.read_file(s.ws, str(tmp_path / "x.md"))
     assert questions and "Let CodeMitra read" in questions[0]
     assert any(r["kind"] == "outside_read" and r["allowed"] for r in _rows(s))
+
+
+# -- review 2026-11-15 --
+
+def test_in_the_home_folder_a_yes_covers_only_that_file(two, monkeypatch):
+    ws, other, asked = two
+    monkeypatch.setattr(T.Path, "home", classmethod(lambda cls: other))
+    T.read_file(ws, str(other / "notes.md"))
+    (other / "b.md").write_text("b\n", encoding="utf-8")
+    T.read_file(ws, str(other / "b.md"))
+    assert len(asked) == 2
+
+
+def test_a_home_path_asks_instead_of_looking_in_the_project(two, monkeypatch):
+    ws, other, asked = two
+    monkeypatch.setenv("USERPROFILE", str(other))
+    monkeypatch.setenv("HOME", str(other))
+    assert "line one" in T.read_file(ws, "~/notes.md") and asked == [str(other / "notes.md")]
+
+
+def test_a_made_up_path_still_gets_the_did_you_mean_hint(two):
+    ws, other, asked = two
+    (ws.root / "plan.md").write_text("x\n", encoding="utf-8")
+    with pytest.raises(T.ToolError, match="Did you mean 'plan.md'"):
+        T.read_file(ws, "/logs/brick-breaker/plan.md")
+
+
+def test_score_runs_never_read_outside_their_workspace(tmp_path):
+    from tests.test_live_20261113_b import _session
+    from tests.test_phased import Heard
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "x.md").write_text("secret plans\n", encoding="utf-8")
+    s = _session(tmp_path / "proj", Heard())
+    s.hooks.confirm = lambda *a: True                            # like the score's hooks
+    s.read_outside = False                                       # what score.Runner sets
+    with pytest.raises(T.ToolError, match="did not allow"):
+        T.read_file(s.ws, str(tmp_path / "x.md"))
+    import inspect
+    from app.core import score
+    assert "s.read_outside = False" in inspect.getsource(score.Runner)

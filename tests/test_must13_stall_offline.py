@@ -21,7 +21,7 @@ class Stalls(Heard):
     def stream(self, messages):
         self.heard.append([m.content for m in messages])
         raise httpx.ReadTimeout("timed out")
-        yield  # noqa: unreachable: a generator, like a real stream
+        yield  # unreachable: makes this a generator, like a real stream
 
 
 def test_a_stalled_laptop_model_stops_the_turn_and_says_why(tmp_path):

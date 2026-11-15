@@ -208,7 +208,7 @@ def write_drafts(files: list[Path], run_claude=None, say=lambda t: None) -> list
             n += 1
         case["id"] = path.stem
         head = (f"# /bad from {turn['project']} · drafted by the {who}\n# CodeMitra answered: "
-                + " ".join(turn["mitra"].split())[:300] + "\n# Edit the checks if needed, then `mitra cases review`.\n")
+                + " ".join(turn["mitra"].split())[:300] + "\n# Edit the checks if needed, then `codemitra cases review`.\n")
         path.write_text(head + to_toml(case), encoding="utf-8")
         state.setdefault("drafted", []).append(turn["key"])
         written.append(path)

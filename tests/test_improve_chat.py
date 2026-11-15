@@ -214,3 +214,17 @@ def test_a_held_out_case_that_breaks_drops_the_rule(monkeypatch):
 def test_held_out_cases_are_never_the_evidence():
     row = _score_row({**BASE, "real": [0, 1]})
     assert all(f["category"] != "real" for f in IC.score_failures(row))
+
+
+
+def test_targets_are_only_the_failures_the_judge_runs():
+    """Review: coding failures from a full score were targets the judge never runs, so every rule was dropped."""
+    row = _row(BASE, [("small_1", "small", "failed"), ("B3_how_are_you", "behaviour", "x")])
+    entry = _run(Proposer(_rule("In small talk, never bring up the project.")), Scores(BASE, BETTER), row)
+    assert entry["result"] == "kept" and entry["gate"]["targeted_gains"] == ["B3_how_are_you"]
+
+
+def test_a_queued_coach_rule_counts_any_reliable_fix():
+    IC.queue_rules([{"text": "Ask one short question back when the user is deciding.", "why": "1"}])
+    entry = _run(Proposer(), Scores(BASE, {**BASE, "ideas": [2, 2]}), _row(BASE, FAILED))
+    assert entry["result"] == "kept" and entry["source"] == "coach"

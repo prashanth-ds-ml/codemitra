@@ -57,7 +57,7 @@ def _slug(text: str) -> str:
 
 
 HISTORY = "## Earlier"
-_HIST_RE = re.compile(r"^- (\S+ \S+) · said: (.*?) · decided: (.*?) · open: (.*)$", re.M)
+_HIST_RE = re.compile(r"^- (.*?) · said: (.*?) · decided: (.*?) · open: (.*)$", re.M)  # updated may be "-"
 
 
 def _read(f: Path) -> dict | None:

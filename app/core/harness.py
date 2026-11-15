@@ -60,9 +60,22 @@ def active_path() -> Path:
     return Path(os.environ.get("CODEMITRA_HARNESS") or home() / "harness.toml")
 
 
+def _cut(text: str, limit: int, what: str, cut: list) -> str:
+    """Within the limit, at a word and marked with …; a cut is noted (review: no silent truncation)."""
+    text = " ".join(str(text).split())
+    if len(text) <= limit:
+        return text
+    cut.append(what)
+    return text[:limit - 1].rsplit(" ", 1)[0] + "…"
+
+
 def _clean(h: Harness) -> Harness:
-    h.rules = [" ".join(str(r).split())[:MAX_RULE_CHARS] for r in h.rules if str(r).strip()][:MAX_RULES]
-    h.tools = {str(k): " ".join(str(v).split())[:MAX_TOOL_CHARS] for k, v in h.tools.items() if str(v).strip()}
+    cut: list[str] = []
+    h.rules = [_cut(r, MAX_RULE_CHARS, f"rule {i + 1}", cut) for i, r in enumerate(h.rules) if str(r).strip()][:MAX_RULES]
+    h.tools = {str(k): _cut(v, MAX_TOOL_CHARS, f"tool text {k}", cut) for k, v in h.tools.items() if str(v).strip()}
+    if cut:
+        import sys
+        print(f"codemitra: harness v{h.version}: shortened to fit the prompt budget: {', '.join(cut)}", file=sys.stderr)
     limits = dict(DEFAULT_LIMITS)
     for k, v in (h.limits or {}).items():
         if k in DEFAULT_LIMITS:

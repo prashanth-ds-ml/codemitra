@@ -119,13 +119,15 @@ _LABELLED = ("rephrase", "unhappy", "happy", "interrupt", "undo")
 
 def unlabelled_pairs(record: Path, limit: int = LABEL_MAX_PAIRS) -> list[dict]:
     """(answer of turn n, the user's message of turn n+1) where nothing says yet how turn n went: no rule label,
-    no /good or /bad, no +/-, and not done by the model before. Newest last."""
+    no /good or /bad, no +/-, and not done by the model before. Newest last. Only the LAST session in the record:
+    one file holds a whole day, and every session numbers its turns from 1 again (review)."""
     try:
         rows = [json.loads(x) for x in Path(record).read_text(encoding="utf-8").splitlines() if x.strip()]
     except (OSError, ValueError):
         return []
+    start = max((i for i, r in enumerate(rows) if r.get("kind") == "session"), default=0)
     said, answers, done = {}, {}, set()
-    for r in rows:
+    for r in rows[start:]:
         k = r.get("kind")
         if k == "turn_start" and r.get("turn") is not None:
             said[r["turn"]] = str(r.get("user") or "")
@@ -156,11 +158,13 @@ def model_labels(llm, record: Path) -> tuple[list[dict], list[int]]:
     reply = str(getattr(llm.invoke([HumanMessage(content=LABEL_PROMPT.format(pairs=text))]), "content", "") or "")
     m = re.search(r"\[.*\]", reply, re.S)
     try:
-        data = json.loads(m.group(0)) if m else []
+        data = json.loads(m.group(0)) if m else None
     except ValueError:
-        data = []
+        data = None
+    if not isinstance(data, list):  # an empty or unusable reply is a failure, not "nothing to label" (CLAUDE.md)
+        raise ValueError(f"the model's labels were not a JSON list: {reply[:120]!r}")
     out = []
-    for d in data if isinstance(data, list) else []:
+    for d in data:
         try:
             i, verdict = int(d.get("n")), str(d.get("verdict", "")).lower()
         except (TypeError, ValueError, AttributeError):
