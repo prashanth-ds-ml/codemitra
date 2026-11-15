@@ -52,7 +52,7 @@ def test_look_gets_only_read_tools_and_answers_with_the_file(tmp_path):
     s = _session(tmp_path, m)
     res = s.phased(_msgs("how does step work?"))
     assert res.text == "It adds one (game.py:2)." and res.steps == 3
-    assert set(m.offered[1]) == {"list_files", "read_file", "search", "run_tests", "package_info"}
+    assert set(m.offered[1]) == {"list_files", "read_file", "search", "run_tests", "package_info", "use_skill"}
     assert [r["name"] for r in _rows(s) if r["kind"] == "phase"] == ["look_at_code"]
 
 

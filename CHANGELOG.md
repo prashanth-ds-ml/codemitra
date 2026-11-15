@@ -3,6 +3,13 @@
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
 ## [Unreleased]
+- **Add skills and MCP servers (E-134):** `codemitra skills add <folder or git URL>` / `remove` / `import claude`;
+  `codemitra mcp add <name> -- <command>` or `--url <address>` / `remove` / `import cursor|vscode`. Skills in
+  `~/.codemitra/skills` work in every project. A new server starts once to show it works, and every tool of it asks
+  you first.
+- **Skills cost less and are opened on demand:** the instructions carry a short list (about 230 tokens, was about
+  1,440 with the 23 skills in this repo, over the 3K budget); the model opens one with the new `use_skill` tool.
+  The list no longer claims that skills run by themselves or skip approval (that was never built).
 - **A promise is not an answer (E-133):** "I'll create `query.sql` now" with nothing done is sent back once with
   "do it now"; tool calls in Qwen's XML form, or written only in the thinking, are run; old thinking is not sent back.
 - **Shorter test output:** a long failing run shows the first failure's end and the FAILED lines, not every line.

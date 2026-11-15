@@ -12,6 +12,13 @@ machine or your judgment. Updated every release.
 | U-005 | M4 | Fresh-eyes read of README and CASE_STUDY | Needs someone who did not write them | open |
 | U-006 | M0 | Free RAM before model runs: close Edge, Chrome and the ChatGPT app, or reboot and open nothing else | Your apps and tabs | open again: done 2026-10-26 for the model check (~6 GB free), but the idle bench server was then stopped for low memory; needed before the baselines |
 
+## 2026-11-15 · Skills and MCP servers (E-134)
+
+- [ ] `codemitra skills add <a skill folder or a git URL of skills>`, then in a chat ask for that job: CodeMitra opens
+  the skill (a `use_skill` line) and follows it
+- [ ] `codemitra mcp add <a server you use> -- <its command>`: it starts at once and lists its tools; in a chat
+  "use <server> to ..." asks you before each of its tools
+
 ## 2026-11-15 · Must-haves 7-13 (v0.8.4)
 
 - [ ] `/kaggle start`: the start shows "web search ready (N results in a test)"; then *"latest news about

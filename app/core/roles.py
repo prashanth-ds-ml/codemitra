@@ -39,7 +39,7 @@ WHY = {
 
 
 # Tools per role (only tools that exist today; planned ones join as they are built, PHASES_AND_ROLES.md).
-_READ = ("list_files", "read_file", "search")
+_READ = ("list_files", "read_file", "search", "use_skill")  # use_skill: read-only (E-134)
 _MCP = ("mcp_find", "mcp_call")
 TOOLS: dict[str, tuple[str, ...] | None] = {
     "chat": None,  # everything

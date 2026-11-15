@@ -48,9 +48,9 @@ ABOUT_CODEMITRA = """## About you (CodeMitra)
 You are CodeMitra, the user's own coding assistant (github.com/prashanth-ds-ml/codemitra), built for small local
 models: this laptop (Ollama, qwen3.5, 64K) or a free Kaggle T4 GPU (256K; `codemitra kaggle start`). You can: talk
 things through; read and explain code; change it and run the tests (the tests run by themselves after each change;
-"done" without a passing run is flagged); plan bigger work (plan.md) and build it task by task (run_plan, `codemitra night`); search the web (the whole
-web while Kaggle runs; on the laptop only Wikipedia, GitHub, arXiv, Hugging Face, Ollama) and read pages; MCP servers
-(git, github, context7, semgrep); skills (/skills); draft mails in the user's voice (me.md); remember conversations
+"done" without a passing run is flagged); plan bigger work (plan.md) and build it task by task (run_plan, `codemitra night`); search the web (all of it on
+Kaggle; on the laptop only Wikipedia, GitHub, arXiv, Hugging Face, Ollama) and read pages; MCP servers and
+skills (/mcp, /skills); draft mails in the user's voice (me.md); remember conversations
 as threads; read a file outside this project folder (read-only, after a yes). Every turn is recorded; /good and /bad
 mark answers; `codemitra score` measures you; `codemitra improve` keeps a rule only if the score improves.
 Not built yet: a /good or /bad changes you only after `codemitra improve` tests a rule, not straight away; no tests
@@ -304,7 +304,7 @@ PHASE_SPECS = [
      "parameters": {"type": "object", "properties": {"goal": {"type": "string"}}, "required": ["goal"]}},
 ]
 PHASES = {
-    "look_at_code": dict(tools=("list_files", "read_file", "search", "run_tests", "package_info"), budget="explain_max_steps",
+    "look_at_code": dict(tools=("list_files", "read_file", "search", "run_tests", "package_info", "use_skill"), budget="explain_max_steps",
                          note="[CodeMitra: look phase. Find what answers the question: search for a name or list_files, "
                               "read only the part you need, run_tests if the question is whether tests pass. Then "
                               "answer clearly (Markdown), citing each point as path:line with the file path "
@@ -416,7 +416,8 @@ def cited_files(text: str, root: Path) -> list[str]:
     return out
 
 
-READ_ONLY_TOOLS = {"list_files", "read_file", "search", "package_info", "web_search", "fetch_url", "mcp_find"}  # plan mode
+READ_ONLY_TOOLS = {"list_files", "read_file", "search", "package_info", "web_search", "fetch_url", "mcp_find",
+                   "use_skill"}  # plan mode
 CHANGE_TOOLS = ("edit_file", "write_file", "append_file")  # D-078 #2: after these, the tests run
 # E-114: a phase may hand over to the next one in the same turn (looked first, then changes or plans)
 PHASE_NEXT = {"look_at_code": ("make_change", "propose_plan"), "look_up": ("look_at_code", "make_change")}
@@ -569,12 +570,14 @@ EXTRA_SPECS = [
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "fetch_url", "description": "Read a web page (Hugging Face and GitHub pages give their README).",
      "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
-    {"name": "mcp_find", "description": "Find tools on the connected MCP servers (git, GitHub, docs, ...).",
+    {"name": "mcp_find", "description": "Find tools on the MCP servers.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "mcp_call", "description": "Call an MCP tool found with mcp_find.",
      "parameters": {"type": "object", "properties": {"server": {"type": "string"}, "tool": {"type": "string"},
                                                      "arguments": {"type": "object"}},
                     "required": ["server", "tool"]}},
+    {"name": "use_skill", "description": "Open a listed skill.",
+     "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "run_plan", "description": "Build a plan file task by task: implement each task until its "
                                         "'Done when' tests pass, then run all tests. Runs in the plan's folder.",
      "parameters": {"type": "object", "properties": {"plan_path": {"type": "string"}},
@@ -635,6 +638,7 @@ class Hooks:
     mcp_find: Callable[[str], str]
     mcp_call: Callable[[str, str, dict], str]
     on_plan_event: Callable | None = None  # core loop events while run_plan works
+    use_skill: Callable[[str], str] | None = None  # (name) -> the skill's SKILL.md text or a ✗ (E-134)
     # (rel, old text or None, new text) -> "yes" | "all" | "no: <reason>"; None = use `confirm` with a plain diff
     confirm_write: Callable[[str, str | None, str], str] | None = None
     working: Callable[[str], object] = _no_activity  # (label) -> context manager shown while a tool runs
@@ -974,6 +978,11 @@ class ChatSession:
             if name == "fetch_url":
                 with self.hooks.working(f"Reading {str(args.get('url', ''))[:60]}"):
                     out = self.hooks.fetch_url(str(args.get("url", "")))
+                return out, not out.startswith("✗")
+            if name == "use_skill":
+                if self.hooks.use_skill is None:
+                    return "✗ No skills here.", False
+                out = self.hooks.use_skill(str(args.get("name", "")))
                 return out, not out.startswith("✗")
             if name == "mcp_find":
                 return self.hooks.mcp_find(str(args.get("query", ""))), True

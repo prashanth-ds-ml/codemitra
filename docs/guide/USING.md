@@ -50,6 +50,37 @@ In the terminal (not inside the chat): `codemitra update` (the newest release), 
 what failed), `codemitra score` (the measuring set: how good it is today, kept in `results/scores.jsonl`),
 `codemitra --help` for everything.
 
+## Skills and MCP servers
+A **skill** is a folder with a `SKILL.md`: a playbook (how to review a PR, set up FastAPI, ...) that CodeMitra opens
+when your request matches. It is the same format Claude Code uses. A skill is only text: nothing in it is run.
+
+| Command | What it does |
+|---|---|
+| `codemitra skills` | list them: this project's (`skills/`, `.codemitra/skills/`) and yours (`~/.codemitra/skills/`, every project) |
+| `codemitra skills add <folder or git URL> [name]` | add to yours; a repo of skills adds all, or only `name`; `--project` adds to this project, `--replace` updates |
+| `codemitra skills remove <name> [--project]` | remove one |
+| `codemitra skills import claude` | copy your Claude Code skills (`~/.claude/skills`) |
+| `/skills show <name>` | read one in the chat |
+
+CodeMitra's instructions carry only a short list (one line per skill, the whole list about 230 tokens however many you
+add); the model opens a skill with `use_skill` when it needs it.
+
+An **MCP server** gives CodeMitra more tools (git, GitHub, docs, a database, ...). git, GitHub, context7 and semgrep
+are built in.
+
+| Command | What it does |
+|---|---|
+| `codemitra mcp add <name> -- <command> [args]` | a server that runs on your machine, e.g. `codemitra mcp add time -- uvx mcp-server-time` |
+| `codemitra mcp add <name> --url <https://...> [--header 'Authorization=Bearer ${TOKEN}']` | a server on the web; `--env K=V` for a command's environment |
+| `codemitra mcp remove <name>` | remove one you added (`/mcp off <name>` turns a built-in off) |
+| `codemitra mcp import [cursor\|vscode]` | copy servers from Claude Code (default), Cursor or VS Code |
+| `/mcp` · `/mcp test <name>` · `/mcp tools <name>` | list them, start one, see its tools |
+
+They go into `~/.codemitra/mcp.json` and start once straight away so you see they work. Every tool of a server you
+add asks you first until you add `allow` patterns to its entry (for example `"allow": ["get_*", "list_*"]`).
+`--project` writes the project's `.codemitra/mcp.json` instead: CodeMitra uses it only after `/mcp trust`, and refuses a
+secret typed into it (write `${VAR}` and set VAR in your environment).
+
 ## Feedback, without extra work
 Your **next message** tells CodeMitra how the last answer went, and it records that by itself: *"why don't you…"*,
 *"did you do that?"*, a pasted error → it went wrong; *"thanks"*, *"works"*, a yes to its offer → it went right.

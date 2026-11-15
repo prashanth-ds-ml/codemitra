@@ -293,10 +293,39 @@ def cmd_mcp(
     args: list[str] | None = typer.Argument(None, help="list | test <name> | tools <name> | on|off <name> | trust | import | call <server> <tool> {json}"),
     cwd: str | None = typer.Option(None, "--cwd", help="Start path for project root detection."),
 ) -> None:
-    """List, test and manage MCP servers."""
+    """List, test and manage MCP servers; add or remove one (`codemitra mcp add <name> -- <command> [args]`)."""
     cfg, workspace = _phase5_workspace(cwd)
-    reply = _build_mcp_reply(workspace, cfg, " ".join(args or []))
+    words = list(args or [])
+    if words and words[0].lower() in {"add", "remove", "rm"}:
+        argv = _raw_tail_after("mcp") or words  # click drops `--`; the raw argv keeps it and Windows paths as typed
+        reply = mcp_registry.handle_add_remove(
+            workspace, argv, test=lambda name: mcp_registry.handle_command(workspace, f"test {name}"))
+        _say(reply)
+        if reply.startswith("✗"):
+            raise typer.Exit(1)
+        return
+    reply = _build_mcp_reply(workspace, cfg, " ".join(words))
     _say(reply)
+
+
+def _raw_tail_after(command: str) -> list[str]:
+    """The words typed after `codemitra <command>`, without --cwd (E-134: `mcp add x -- npx …` keeps its `--`)."""
+    argv = sys.argv[1:]
+    if command not in argv:
+        return []
+    tail = argv[argv.index(command) + 1:]
+    out, skip = [], False
+    for word in tail:
+        if skip:
+            skip = False
+            continue
+        if word == "--cwd" and "--" not in out:
+            skip = True
+            continue
+        if word.startswith("--cwd=") and "--" not in out:
+            continue
+        out.append(word)
+    return out
 
 
 def cmd_logs(target: str = typer.Argument("summary"), cwd: str | None = typer.Option(None, "--cwd", help="Start path for project root detection.")) -> None:
@@ -775,8 +804,26 @@ cli.command("improve")(cmd_improve)
 cli.command("/models", hidden=True)(cmd_models)
 cli.command("test")(cmd_test)
 cli.command("/test", hidden=True)(cmd_test)
-cli.command("mcp")(cmd_mcp)
-cli.command("/mcp", hidden=True)(cmd_mcp)
+cli.command("mcp", context_settings={"ignore_unknown_options": True})(cmd_mcp)
+
+
+def cmd_skills(
+    args: list[str] | None = typer.Argument(None, help="list | show <name> | add <folder or git URL> [name] "
+                                            "[--project] [--replace] | remove <name> [--project] | import claude"),
+    cwd: str | None = typer.Option(None, "--cwd", help="Start path for project root detection."),
+) -> None:
+    """List, add, remove and import skills (playbooks CodeMitra opens when a request matches)."""
+    cfg, workspace = _phase5_workspace(cwd)
+    words = [a for a in (args or []) if a != "list"]
+    found = skills_registry.discover(workspace, cfg.get("skill_dirs"))
+    reply = _build_skills_reply(found, "/skills " + " ".join(words), workspace=workspace)
+    _say(reply)
+    if reply.startswith("✗"):
+        raise typer.Exit(1)
+
+
+cli.command("skills", context_settings={"ignore_unknown_options": True})(cmd_skills)
+cli.command("/mcp", hidden=True, context_settings={"ignore_unknown_options": True})(cmd_mcp)
 cli.command("logs")(cmd_logs)
 cli.command("/logs", hidden=True)(cmd_logs)
 
@@ -923,8 +970,8 @@ _COMMAND_HELP = [
         ("/copy",          "Copy CodeMitra's last answer (e.g. a drafted mail) to the clipboard"),
         ("/commit [msg]",  "Commit staged changes (--generate drafts the message); never pushes"),
         ("/review [staged]", "Review the current or staged diff for real problems"),
-        ("/mcp",           "MCP servers: list, test, tools, on/off, trust, import, call"),
-        ("/skills",        "List skills (/skills show <name>)"),
+        ("/mcp",           "MCP servers: list, test, tools, add, remove, on/off, trust, import, call"),
+        ("/skills",        "Skills: list, show <name>, add <folder or git URL>, remove, import claude"),
         ("/logs [name]",   "Inspect .codemitra logs"),
         ("/resume",        "Saved session summary and recent activity"),
         ("/compact",       "Compress the conversation to free context"),
@@ -1000,6 +1047,10 @@ def _build_project_instructions_prompt(instructions: list[dict[str, str]]) -> st
     return "## Project Instructions\n" + "\n\n".join(sections)
 
 
+SKILLS_USAGE = ("Usage: `/skills` · `/skills show <name>` · `/skills add <folder or git URL> [name] [--project] "
+                "[--replace]` · `/skills remove <name> [--project]` · `/skills import claude`")
+
+
 def _build_skills_prompt(skills: list[skills_registry.Skill]) -> str:
     return skills_registry.format_prompt(skills)
 
@@ -1011,6 +1062,10 @@ def _build_skills_reply(
     workspace: str | None = None,
 ) -> str:
     target = raw.strip()[7:].strip() if raw.strip().lower().startswith("/skills") else raw.strip()
+    if workspace is not None:
+        managed = skills_registry.handle_command(workspace, target)  # add / remove / import (S3)
+        if managed is not None:
+            return managed
     if target.startswith("show "):
         query = target[5:].strip()
         if not query:
@@ -1026,18 +1081,20 @@ def _build_skills_reply(
         return f"## {skill.name}\n\n- **Path:** `{skill.path}`\n- **Description:** {skill.description}\n\n```md\n{body}\n```"
 
     if target:
-        return "Usage: `/skills` or `/skills show <name>`."
+        return SKILLS_USAGE
 
     if not skills:
         return (
             "No CodeMitra skills found yet.\n\n"
-            "Add skills under `skills/<name>/SKILL.md` or `.codemitra/skills/<name>/SKILL.md`."
+            "Add one with `/skills add <folder or git URL>` (yours, in every project; `--project` for this one), "
+            "or `/skills import claude` to copy your Claude Code skills."
         )
     lines = ["## CodeMitra skills", ""]
     for skill in skills:
-        lines.append(f"- **{skill.name}** — `{skill.path}`")
+        where = " (yours)" if skill.source == "user" else ""
+        lines.append(f"- **{skill.name}**{where} — `{skill.path}`")
         lines.append(f"  {skill.description}")
-    lines.extend(["", "Use `/skills show <name>` to inspect a skill."])
+    lines.extend(["", "Use `/skills show <name>` to inspect a skill.", SKILLS_USAGE])
     return "\n".join(lines)
 
 
@@ -2971,6 +3028,7 @@ def _chat():
             fetch_url=lambda u: web_agent.fetch_url.invoke({"url": u}),
             mcp_find=_chat_mcp_find,
             mcp_call=_chat_mcp_call,
+            use_skill=lambda name: skills_registry.use_skill(cfg["workspace"], available_skills, name),
             on_plan_event=EventPrinter(console),
             confirm_write=_chat_confirm_write,
             working=_chat_working,
@@ -3626,6 +3684,9 @@ def _chat():
 
         if cmd.startswith("/skills"):
             ai_reply = _build_skills_reply(available_skills, user_input, workspace=cfg["workspace"])
+            if ai_reply.startswith("✓"):  # added or removed: use_skill sees it now, the short list at the next start
+                available_skills[:] = skills_registry.discover(cfg["workspace"], cfg.get("skill_dirs"))
+                ai_reply += " The short list in CodeMitra's instructions updates at the next start."
             _say(ai_reply)
             memory.append_activity(cfg["workspace"], user_input, ai_reply)
             memory.update_context(cfg["workspace"], user_input)

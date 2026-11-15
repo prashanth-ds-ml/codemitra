@@ -45,8 +45,8 @@ class TestSkillDiscovery:
 
         prompt = skills.format_prompt([skill])
 
-        assert "Available CodeMitra Skills" in prompt
-        assert "read that skill's `SKILL.md`" in prompt
+        assert "## Skills" in prompt
+        assert "use_skill" in prompt
         assert "`rag-pipeline`" in prompt
 
     def test_find_supports_exact_and_partial_match(self):

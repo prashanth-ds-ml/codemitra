@@ -787,9 +787,197 @@ def import_claude_code(workspace: str | os.PathLike) -> str:
     return msg + " Imported tools all need approval until you add `allow` patterns."
 
 
+# ─── Add / remove / import from other tools (M1, M2) ─────────────────────────
+
+_SAFE_SERVER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+ADD_USAGE = ("Usage: `mcp add <name> [--project] [--replace] [--env K=V] -- <command> [args…]` · "
+             "`mcp add <name> --url <https://…> [--header K=V] [--project]` · `mcp remove <name> [--project]`")
+
+
+class McpConfigError(Exception):
+    pass
+
+
+def _literal_secret(key: str, value: str) -> bool:
+    """A secret-looking key whose value holds text beyond ${VAR} references (and a Bearer/Basic/token word)."""
+    if not _SECRET_KEY.search(key):
+        return False
+    rest = _VAR.sub("", value)
+    rest = re.sub(r"\b(bearer|basic|token)\b", "", rest, flags=re.IGNORECASE)
+    return bool(rest.strip())
+
+
+def parse_add(argv: list[str]) -> tuple[str, dict[str, Any], bool, bool]:
+    """`add` arguments -> (name, entry, project, replace). The command is everything after `--`."""
+    if not argv:
+        raise McpConfigError(ADD_USAGE)
+    command: list[str] = []
+    if "--" in argv:
+        cut = argv.index("--")
+        argv, command = argv[:cut], argv[cut + 1:]
+    name, project, replace, url = "", False, False, ""
+    env: dict[str, str] = {}
+    headers: dict[str, str] = {}
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--project":
+            project = True
+        elif a == "--replace":
+            replace = True
+        elif a in ("--url", "--env", "--header") and i + 1 < len(argv):
+            i += 1
+            v = argv[i]
+            if a == "--url":
+                url = v
+            else:
+                k, sep, val = v.partition("=" if a == "--env" else ("=" if "=" in v else ":"))
+                if not sep or not k.strip():
+                    raise McpConfigError(f"{a} takes KEY=VALUE, got '{v}'")
+                (env if a == "--env" else headers)[k.strip()] = val.strip()
+        elif a.startswith("--"):
+            raise McpConfigError(f"unknown option {a}. " + ADD_USAGE)
+        elif not name:
+            name = a
+        else:
+            raise McpConfigError(f"put the server's command after `--` (got '{a}'). " + ADD_USAGE)
+        i += 1
+    if not _SAFE_SERVER.match(name):
+        raise McpConfigError("the server name must be letters, digits, '.', '_' or '-'. " + ADD_USAGE)
+    if bool(url) == bool(command):
+        raise McpConfigError("give either `--url <address>` or `-- <command> [args]`. " + ADD_USAGE)
+    if url and not re.match(r"^https?://", url):
+        raise McpConfigError(f"--url must start with https:// or http:// (got '{url}')")
+    entry: dict[str, Any] = {"type": "http", "url": url} if url else {"command": command[0], "args": command[1:]}
+    if env:
+        entry["env"] = env
+    if headers:
+        entry["headers"] = headers
+    if project:  # the project file is shared in the repo: secrets only as ${VAR} references
+        leaked = [k for k, v in {**env, **headers}.items() if _literal_secret(k, v)]
+        if leaked:
+            raise McpConfigError(f"{', '.join(leaked)} would put a secret in the repo; write it as ${{VAR}} and set "
+                                 "VAR in your environment, or add the server without --project")
+    return name, entry, project, replace
+
+
+def add_server(workspace: str | os.PathLike, name: str, entry: dict[str, Any], project: bool = False,
+               replace: bool = False) -> pathlib.Path:
+    """Save one server into ~/.codemitra/mcp.json (or the project's file). No `allow`: every tool asks first."""
+    path = project_config_path(workspace) if project else user_config_path()
+    data = _load_json(path, {}) if path.is_file() else {}
+    if not isinstance(data, dict):
+        raise McpConfigError(f"{path} is not a JSON object; fix or remove it first")
+    servers = data.setdefault("mcpServers", {})
+    if name in servers and not replace:
+        raise McpConfigError(f"'{name}' is already in {path}; add --replace to change it")
+    servers[name] = entry
+    _save_json(path, data)
+    return path
+
+
+def remove_server(workspace: str | os.PathLike, name: str, project: bool = False) -> pathlib.Path:
+    path = project_config_path(workspace) if project else user_config_path()
+    data = _load_json(path, {}) if path.is_file() else {}
+    servers = data.get("mcpServers", {}) if isinstance(data, dict) else {}
+    if name not in servers:
+        hint = " It is a built-in: `/mcp off " + name + "` turns it off." if name in DEFAULT_SERVERS else ""
+        raise McpConfigError(f"no server '{name}' in {path}.{hint}")
+    del servers[name]
+    _save_json(path, data)
+    return path
+
+
+def handle_add_remove(workspace: str | os.PathLike, argv: list[str], test: Callable | None = None) -> str:
+    """`mcp add …` / `mcp remove …`; after an add to your file, starts the server once to show it works."""
+    sub, rest = argv[0].lower(), argv[1:]
+    try:
+        if sub in {"remove", "rm"}:
+            project = "--project" in rest
+            names = [a for a in rest if a != "--project"]
+            if len(names) != 1:
+                return "Usage: `mcp remove <name> [--project]`"
+            return f"✓ Removed `{names[0]}` from `{remove_server(workspace, names[0], project)}`."
+        name, entry, project, replace = parse_add(rest)
+        path = add_server(workspace, name, entry, project=project, replace=replace)
+    except McpConfigError as exc:
+        return f"✗ {exc}"
+    msg = (f"✓ Added `{name}` to `{path}`. Every tool of it asks you first until you add `allow` patterns "
+           "to its entry.")
+    if project:
+        return msg + f" This is the project's file: run `/mcp trust`, then `/mcp test {name}`."
+    if test is None:
+        return msg + f" `/mcp test {name}` starts it."
+    return msg + "\n\n" + test(name)
+
+
+def cursor_config_paths(workspace: str | os.PathLike) -> list[pathlib.Path]:
+    override = os.environ.get("CODEMITRA_CURSOR_CONFIG")
+    user_file = pathlib.Path(override) if override else pathlib.Path.home() / ".cursor" / "mcp.json"
+    return [user_file, pathlib.Path(workspace) / ".cursor" / "mcp.json"]
+
+
+def vscode_config_paths(workspace: str | os.PathLike) -> list[pathlib.Path]:
+    override = os.environ.get("CODEMITRA_VSCODE_CONFIG")
+    if override:
+        user_file = pathlib.Path(override)
+    elif os.name == "nt":
+        user_file = pathlib.Path(os.environ.get("APPDATA", pathlib.Path.home())) / "Code" / "User" / "mcp.json"
+    elif os.uname().sysname == "Darwin":  # type: ignore[attr-defined]
+        user_file = pathlib.Path.home() / "Library" / "Application Support" / "Code" / "User" / "mcp.json"
+    else:
+        user_file = pathlib.Path.home() / ".config" / "Code" / "User" / "mcp.json"
+    return [user_file, pathlib.Path(workspace) / ".vscode" / "mcp.json"]
+
+
+def import_other(workspace: str | os.PathLike, tool: str) -> str:
+    """Copy servers from Cursor (`mcpServers`) or VS Code (`servers`) into ~/.codemitra/mcp.json (never the repo)."""
+    paths = cursor_config_paths(workspace) if tool == "cursor" else vscode_config_paths(workspace)
+    key = "mcpServers" if tool == "cursor" else "servers"
+    found: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        data = _load_json(path, {}) if path.is_file() else {}
+        if isinstance(data, dict):
+            found.update({k: dict(v) for k, v in (data.get(key) or {}).items() if isinstance(v, dict)})
+    if not found:
+        return f"No MCP servers found in {tool.title()}'s config ({', '.join(f'`{p}`' for p in paths)})."
+    for entry in found.values():  # VS Code writes "stdio" / "http" / "sse" in `type`; the rest is the same shape
+        if str(entry.get("type", "")).lower() == "stdio":
+            entry.pop("type")
+    target = user_config_path()
+    data = _load_json(target, {}) if target.is_file() else {}
+    existing = data.setdefault("mcpServers", {})
+    added = [name for name in found if name not in existing]
+    for name in added:
+        existing[name] = found[name]
+    _save_json(target, data)
+    skipped = sorted(set(found) - set(added))
+    msg = f"Imported {len(added)} server(s) from {tool.title()} into `{target}`: {', '.join(added) or 'none'}."
+    if skipped:
+        msg += f" Already there: {', '.join(skipped)}."
+    vs_inputs = [n for n in added if "${input:" in json.dumps(found[n])]
+    if vs_inputs:
+        msg += f" {', '.join(vs_inputs)} use VS Code `${{input:…}}` values: replace them with `${{VAR}}` in the file."
+    return msg + " Imported tools all need approval until you add `allow` patterns."
+
+
+def _split_args(argline: str) -> list[str]:
+    """Split like a shell but keep Windows backslashes; quotes group words."""
+    try:
+        parts = shlex.split(argline, posix=False)
+    except ValueError:
+        parts = argline.split()
+    return [p[1:-1] if len(p) >= 2 and p[0] == p[-1] and p[0] in "\"'" else p for p in parts]
+
+
 def handle_command(workspace: str | os.PathLike, argline: str = "") -> str:
     parts = argline.strip().split(maxsplit=3)
     sub = parts[0].lower() if parts else ""
+    if sub in {"add", "remove", "rm"}:
+        return handle_add_remove(workspace, _split_args(argline.strip()),
+                                 test=lambda name: handle_command(workspace, f"test {name}"))
+    if sub == "import" and len(parts) >= 2 and parts[1].lower() in {"cursor", "vscode", "code"}:
+        return import_other(workspace, "cursor" if parts[1].lower() == "cursor" else "vscode")
     servers = discover(workspace)
     if sub in {"", "list"}:
         return format_prompt(servers)
@@ -823,7 +1011,8 @@ def handle_command(workspace: str | os.PathLike, argline: str = "") -> str:
         result = call_tool(workspace, server, tool, arguments, approve=lambda *_: True)
         return result.text
     return ("Usage: `/mcp` · `/mcp test <name>` · `/mcp tools <name>` · `/mcp on|off <name>` · `/mcp trust` · "
-            "`/mcp import` · `/mcp call <server> <tool> {json}`")
+            "`/mcp import [cursor|vscode]` · `/mcp call <server> <tool> {json}` · `/mcp add …` · `/mcp remove <name>`"
+            "\n\n" + ADD_USAGE)
 
 
 def build_reply(workspace: str | os.PathLike, servers: list[ServerSpec] | None = None) -> str:

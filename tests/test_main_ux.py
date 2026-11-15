@@ -244,9 +244,9 @@ class TestCloudRoutingConfig:
             )
         ])
 
-        assert "Available CodeMitra Skills" in prompt
+        assert "## Skills" in prompt
         assert "repo-analyzer" in prompt
-        assert "read that skill's `SKILL.md`" in prompt
+        assert "use_skill" in prompt
 
     def test_build_skills_reply_lists_discovered_skills(self):
         reply = _build_skills_reply([
@@ -295,7 +295,7 @@ class TestCloudRoutingConfig:
 
     def test_build_skills_reply_reports_usage_for_unknown_subcommand(self):
         reply = _build_skills_reply([], "/skills delete rag")
-        assert "Usage: `/skills` or `/skills show <name>`" in reply
+        assert "Usage: `/skills`" in reply and "`/skills add" in reply
 
 
 
