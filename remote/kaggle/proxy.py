@@ -21,6 +21,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 QUIET = {"/api/tags", "/api/ps", "/api/version", "/api/show"}  # status checks: not "CodeMitra is using it"
+SEARCH_UPSTREAM = "127.0.0.1:8888"  # SearXNG, started by the notebook (must-have 10); /<token>/search goes there
 
 HOP = {"connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-authorization",
        "proxy-authenticate", "host", "content-length"}
@@ -32,9 +33,10 @@ def _touch(path: str) -> None:
     os.utime(path, None)
 
 
-def make_handler(token: str, upstream: str, state_dir: str | None = None):
+def make_handler(token: str, upstream: str, state_dir: str | None = None, search: str = SEARCH_UPSTREAM):
     host, _, port = upstream.partition(":")
     port_n = int(port or 11434)
+    s_host, _, s_port = search.partition(":")
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -69,7 +71,10 @@ def make_handler(token: str, upstream: str, state_dir: str | None = None):
             if state_dir is not None and tail.split("?")[0] not in QUIET:
                 _touch(os.path.join(state_dir, "last_request"))
             headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
-            conn = http.client.HTTPConnection(host, port_n, timeout=3600)  # a long generation is normal
+            if tail.split("?")[0] == "/search":  # must-have 10: web search by SearXNG on this machine
+                conn = http.client.HTTPConnection(s_host, int(s_port or 8888), timeout=60)
+            else:
+                conn = http.client.HTTPConnection(host, port_n, timeout=3600)  # a long generation is normal
             try:
                 conn.request(self.command, tail, body=body, headers=headers)
                 resp = conn.getresponse()
@@ -106,8 +111,8 @@ def make_handler(token: str, upstream: str, state_dir: str | None = None):
 
 
 def serve(token: str, port: int = 8000, upstream: str = "127.0.0.1:11434",
-          state_dir: str | None = None) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(token, upstream, state_dir))
+          state_dir: str | None = None, search: str = SEARCH_UPSTREAM) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(token, upstream, state_dir, search))
     server.daemon_threads = True
     return server
 

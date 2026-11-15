@@ -12,6 +12,17 @@ machine or your judgment. Updated every release.
 | U-005 | M4 | Fresh-eyes read of README and CASE_STUDY | Needs someone who did not write them | open |
 | U-006 | M0 | Free RAM before model runs: close Edge, Chrome and the ChatGPT app, or reboot and open nothing else | Your apps and tabs | open again: done 2026-10-26 for the model check (~6 GB free), but the idle bench server was then stopped for low memory; needed before the baselines |
 
+## 2026-11-15 · Must-haves 7-13 (v0.8.4)
+
+- [ ] `/kaggle start`: the start shows "web search ready (N results in a test)"; then *"latest news about
+      qwen"* cites news or blog pages (must-have 10; needs your GPU hours)
+- [ ] With about 12 GB free, or on Kaggle: `codemitra improve --chat` runs one round with the fair gate and says
+      kept or dropped with the reason (must-have 7)
+- [ ] A session of 5+ turns, then `exit`: "noted how N answer(s) went" (must-have 9)
+- [ ] *"read <a file in another folder>"*: the question appears; yes reads it, no is respected (must-have 12)
+- [ ] Turn the Wi-Fi off with Kaggle up: the status line says offline, the next turn runs on the laptop, Kaggle is
+      used again after Wi-Fi is back (must-have 13)
+
 ## 2026-11-14 · v0.8.1 for friends (D-081, D-083)
 
 - [ ] A friend (or a spare Windows user account) clones and runs `setup.ps1`: Ollama, the model, Kaggle guidance,

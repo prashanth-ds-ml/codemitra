@@ -16,7 +16,10 @@ or Kaggle) and a memory check (**✓** fine; **⚠ / ✗** not enough free memor
 - **Everyday help:** *"draft a mail to the team about …"*, *"make it shorter"*, *"summarise this: …"*, *"translate
   …"*, general questions get one quick answer. Mails use your name and signature from `~/.codemitra/me.md`.
 - **"where did we stop?"** is answered at once from CodeMitra's records (last requests, plan progress, git).
-- **Web:** *"look up the latest pygame version"* searches and cites what it found.
+- **Web:** *"look up the latest pygame version"* searches and cites what it found (the whole web while Kaggle
+  runs; on the laptop Wikipedia, GitHub, arXiv, Hugging Face and the Ollama library).
+- **Files outside the project:** *"read C:\notes\api.md"*: CodeMitra asks first, then only reads it (once per
+  folder per session). Secret files (.env, keys, ~/.ssh, ~/.kaggle) are never read.
 
 ## Modes and keys
 | Key | |

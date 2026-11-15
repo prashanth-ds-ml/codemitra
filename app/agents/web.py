@@ -122,9 +122,56 @@ def search_web(query: str, max_results: int = 5) -> str:
         return "✗ No search query provided."
     if not is_online():
         return OFFLINE
+    whole_web = searx_search(q, max(3, min(int(max_results or 5), 10)))  # must-have 10: the whole web via Kaggle
+    if whole_web:
+        return format_results(q, whole_web, {})
     per_source = max(2, min(int(max_results or 4), 8))
     results, errors = search(q, per_source=per_source)
     return format_results(q, results, errors)
+
+
+SEARX_TIMEOUT = 25
+
+
+def _searx_url() -> str | None:
+    """The Kaggle session's search address, when its notebook said SearXNG passed its test (must-have 10)."""
+    try:
+        from app import kaggle, remote
+        r = remote.active()
+        if not r or r.get("name") != "kaggle" or not kaggle.load_state().get("search"):
+            return None
+        return r["url"].rstrip("/") + "/search"
+    except Exception:
+        return None
+
+
+def searx_search(query: str, n: int = 6, url: str | None = None) -> list:
+    """General web results (news, blogs, docs, company sites) from SearXNG on Kaggle, or [] (then the open APIs)."""
+    from app.agents.search_sources import Result
+
+    base = url or _searx_url()
+    if not base:
+        return []
+    q = urllib.parse.urlencode({"q": query, "format": "json"})
+    try:
+        req = urllib.request.Request(f"{base}?{q}", headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(req, timeout=SEARX_TIMEOUT) as r:
+            import json
+            data = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        return []
+    out, seen = [], set()
+    for row in data.get("results", []) if isinstance(data, dict) else []:
+        link = str(row.get("url") or "")
+        if not link.startswith("http") or link in seen:
+            continue
+        seen.add(link)
+        engines = row.get("engines") or [row.get("engine") or "web"]
+        out.append(Result(source="web: " + "/".join(map(str, engines[:2])), title=str(row.get("title") or link)[:200],
+                          url=link, snippet=re.sub(r"\s+", " ", str(row.get("content") or ""))[:300]))
+        if len(out) >= n:
+            break
+    return out
 
 
 def readme_url(url: str) -> str | None:

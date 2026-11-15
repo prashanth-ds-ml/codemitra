@@ -228,6 +228,8 @@ def run_tool(ws: T.Workspace, name: str, args: dict) -> tuple[str, T.TestRun | N
             return T.read_file(ws, args.get("path", ""), args.get("start", 1), args.get("end", 0)), None
         if name == "search":
             return T.search(ws, args.get("pattern", ""), args.get("path", ".")), None
+        if name == "package_info":
+            return T.package_info(ws, args.get("name", "")), None
         if name == "make_dir":
             return T.make_dir(ws, args.get("path", "")), None
         if name == "write_file":

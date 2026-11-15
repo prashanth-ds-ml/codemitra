@@ -321,6 +321,7 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep) 
     from app import remote
     deadline = time.time() + wait_min * 60
     seen: set[str] = set()
+    search_ok = False  # must-have 10: set by the notebook's "search" line
     while time.time() < deadline:
         status, failure = run_status(api, ref)
         if status in ("ERROR", "CANCEL_REQUESTED", "CANCEL_ACKNOWLEDGED", "COMPLETE"):
@@ -352,7 +353,11 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep) 
                 if stage == "error":
                     stop.set()
                     raise KaggleError(f"The notebook failed: {fields.get('detail', '?')}. Log: {state.get('url')}")
-                if stage == "loaded":
+                if stage == "search":  # must-have 10: SearXNG on the notebook passed its engine test, or not
+                    search_ok = fields.get("ok") == "True"
+                    echo(f"  ✓ web search ready ({fields.get('results')} results in a test)" if search_ok else
+                         "  · web search did not start on Kaggle: CodeMitra uses its own sources")
+                elif stage == "loaded":
                     echo(f"  ✓ {fields.get('model')} {fields.get('gb')} GB at {fields.get('context')} context, "
                          f"{fields.get('where')}")
                 elif stage == "ready" and fields.get("url"):
@@ -367,7 +372,7 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep) 
                     if problem:
                         raise KaggleError(f"The notebook is ready but its address does not answer: {problem}")
                     data = remote.set_remote(url, ctx, "kaggle")
-                    state.update(started=time.time(), public=fields["url"])
+                    state.update(started=time.time(), public=fields["url"], search=search_ok)
                     save_state(state)
                     echo(f"  ☁ ready: every CodeMitra window now uses Kaggle ({state.get('model')} at {ctx // 1024}K)")
                     return data

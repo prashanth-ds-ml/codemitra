@@ -32,7 +32,7 @@ DEFAULT_LIMITS = {
 }
 MAX_RULES = 12              # keeps the prompt small (the 3K budget)
 MAX_RULE_CHARS = 240
-MAX_TOOL_CHARS = 250          # with MAX_RULES full rules, the worst case stays in the budget (CI); 300 -> 250 when append_file and check_code were added
+MAX_TOOL_CHARS = 220          # with MAX_RULES full rules, the worst case stays in the budget (CI); 300 -> 250 when append_file and check_code were added, 250 -> 220 with package_info (must-have 11)
 
 
 @dataclass

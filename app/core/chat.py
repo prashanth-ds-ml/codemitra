@@ -45,18 +45,16 @@ changes you did not make."""
 # E-103 (live 2026-11-11): asked "do you know about you?" CodeMitra said it had no fixed identity, and when the user
 # planned its features it proposed ones it already has (tools, MCP, Kaggle, tests, learning from feedback)
 ABOUT_CODEMITRA = """## About you (CodeMitra)
-You are CodeMitra, the user's own coding assistant: they build you (github.com/prashanth-ds-ml/codemitra) to work with
-small local models, on this laptop (Ollama, qwen3.5, 64K context) or on a free Kaggle T4 GPU (256K; `codemitra kaggle
-start`). What you can already do: talk things through; read and explain code; make changes and run the tests (after each
-change the project's tests run by themselves and you see the result; a "done" without a passing run is flagged); plan bigger work (plan.md) and build it task by task with tests (run_plan, `codemitra night`
-overnight); search the web and read pages; MCP servers (git, github, context7, semgrep); skills from skills/ folders
-(/skills); draft mails and summaries in the user's voice from their notes (me.md); keep short summaries of earlier
-conversations as threads. Every turn is recorded; /good and /bad mark answers; `codemitra score` measures you;
-`codemitra improve` learns rules you keep only if the score improves (`codemitra harness` shows them).
-Not built yet (D-078, being built): web search reaches only
-Wikipedia, GitHub, arXiv, Hugging Face and the Ollama library (no news, blogs or company sites); you cannot read
-files outside this project folder; thread summaries can lose details such as links; a /good or /bad changes you
-only after `codemitra improve` tests a rule, not straight away; no tests written before code, no charts.
+You are CodeMitra, the user's own coding assistant (github.com/prashanth-ds-ml/codemitra), built for small local
+models: this laptop (Ollama, qwen3.5, 64K) or a free Kaggle T4 GPU (256K; `codemitra kaggle start`). You can: talk
+things through; read and explain code; change it and run the tests (the tests run by themselves after each change;
+"done" without a passing run is flagged); plan bigger work (plan.md) and build it task by task (run_plan, `codemitra night`); search the web (the whole
+web while Kaggle runs; on the laptop only Wikipedia, GitHub, arXiv, Hugging Face, Ollama) and read pages; MCP servers
+(git, github, context7, semgrep); skills (/skills); draft mails in the user's voice (me.md); remember conversations
+as threads; read a file outside this project folder (read-only, after a yes). Every turn is recorded; /good and /bad
+mark answers; `codemitra score` measures you; `codemitra improve` keeps a rule only if the score improves.
+Not built yet: thread summaries can lose details such as links; a /good or /bad changes you only after `codemitra
+improve` tests a rule, not straight away; no tests written before code, no charts.
 When asked what you can do, never claim a "not built yet" item.
 When the user plans your features, say which ones you already have."""
 
@@ -271,7 +269,7 @@ PHASE_SPECS = [
      "parameters": {"type": "object", "properties": {"goal": {"type": "string"}}, "required": ["goal"]}},
 ]
 PHASES = {
-    "look_at_code": dict(tools=("list_files", "read_file", "search", "run_tests"), budget="explain_max_steps",
+    "look_at_code": dict(tools=("list_files", "read_file", "search", "run_tests", "package_info"), budget="explain_max_steps",
                          note="[CodeMitra: look phase. Find what answers the question: search for a name or list_files, "
                               "read only the part you need, run_tests if the question is whether tests pass. Then "
                               "answer clearly (Markdown), citing each point as path:line with the file path "
@@ -335,7 +333,7 @@ REPLY_NOTES = {
 }
 
 # D-068 step 2: questions about the project's code: read only, a small budget, always an answer
-EXPLAIN_TOOLS = ("list_files", "read_file", "search")
+EXPLAIN_TOOLS = ("list_files", "read_file", "search", "package_info")
 EXPLAIN_NOTE = (
     "This is a question, review or brainstorm about the project. You may only look: list_files, search, read_file "
     "(read the part you need, not whole big files). You have {steps} steps. Find the right files first (search for "
@@ -383,7 +381,7 @@ def cited_files(text: str, root: Path) -> list[str]:
     return out
 
 
-READ_ONLY_TOOLS = {"list_files", "read_file", "search", "web_search", "fetch_url", "mcp_find"}  # plan mode
+READ_ONLY_TOOLS = {"list_files", "read_file", "search", "package_info", "web_search", "fetch_url", "mcp_find"}  # plan mode
 CHANGE_TOOLS = ("edit_file", "write_file", "append_file")  # D-078 #2: after these, the tests run
 # E-114: a phase may hand over to the next one in the same turn (looked first, then changes or plans)
 PHASE_NEXT = {"look_at_code": ("make_change", "propose_plan"), "look_up": ("look_at_code", "make_change")}
@@ -644,6 +642,7 @@ class ChatSession:
         self.llm, self.hooks, self.mode, self.num_ctx = llm, hooks, mode, num_ctx
         self.harness = harness if harness is not None else H.load()
         self.ws = T.Workspace(Path(workspace), read_only=())  # in the chat the user may ask for test edits
+        self.ws.before_read_outside = self._before_read_outside  # must-have 12 (every path, explain included)
         self.ws.spill_dir = self.ws.root / ".codemitra" / "output"
         # every step of every turn, scrubbed, one file per day: follow a session live, replay it later (D-022)
         self.rec = core_loop.Recorder(self.ws.root / ".codemitra" / "runs" / f"chat-{time.strftime('%Y%m%d')}.jsonl",
@@ -707,6 +706,16 @@ class ChatSession:
         """One row per chat session: model, context, memory fit, free RAM/VRAM, CodeMitra version."""
         from app.core import runinfo
         self.rec.write("session", code_version=runinfo.code_version(), workspace=str(self.ws.root), **info)
+
+    def label_turns(self, llm) -> int:
+        """Must-have 9: at exit, the model labels the turns the rules left open (one call); returns how many it
+        labelled. Each label is a signal row like the rules' own, marked source "model"."""
+        labels, asked = SIG.model_labels(llm, self.rec.path)
+        for lb in labels:
+            self.signal(lb["signal"], of_turn=lb["turn"], why=lb["why"], auto=True, source="model")
+        if asked:
+            self.rec.write("model_labels", turns=asked, labelled=len(labels))
+        return len(labels)
 
     def rate_session(self, stars: int) -> None:
         """D-079: one keypress at exit, 1-5, for the whole session (D-078 phase 3's session rating)."""
@@ -865,6 +874,15 @@ class ChatSession:
                            added=added, removed=removed, diff=diff, author="user")
             self._left[path] = now
         return found
+
+    def _before_read_outside(self, path: str) -> bool:
+        """Must-have 12: a file outside the project is read only after the user says yes, in every mode (auto too);
+        once per folder per session. Recorded either way."""
+        ok = bool(self.hooks.confirm(f"Read outside the project: {path}",
+                                     "CodeMitra only reads it (never changes it); yes covers this folder for the "
+                                     "rest of the session.", f"Let CodeMitra read {path}?"))
+        self.rec.write("outside_read", turn=self.turn_no, path=path, allowed=ok, author="user")
+        return ok
 
     # approval for edits in ask mode
     def _before_write(self, rel: str, old: str | None, new: str) -> None:
@@ -1309,6 +1327,7 @@ class ChatSession:
         self.approve_all = False
         self.ws.journal = res.journal
         self.ws.before_write = self._before_write
+        self.ws.before_read_outside = self._before_read_outside
         specs = H.apply_tools(tool_specs(self.mode), self.harness)
         if self.allowed_tools is not None:  # the role's tool set (routing)
             specs = [s for s in specs if s["name"] in self.allowed_tools]

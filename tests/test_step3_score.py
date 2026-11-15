@@ -143,7 +143,7 @@ def test_an_explain_case_runs_the_explainer_and_fails_an_edit(tmp_path):
                  AIMessage(content=_cases("explain.toml")["X4_wall"]["reference"]))
     out = S.run_explain(_runner(good, tmp_path), only={"X4_wall"})
     assert [(c.id, c.passed, c.steps) for c in out] == [("X4_wall", True, 2)]
-    assert set(good.tool_names) == {"list_files", "read_file", "search"}
+    assert set(good.tool_names) == {"list_files", "read_file", "search", "package_info"}
 
 
 def test_a_coding_task_is_graded_by_hidden_tests(tmp_path):

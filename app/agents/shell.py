@@ -379,6 +379,42 @@ def _model_command_args(command: str, cwd: str) -> list[str]:
     return args
 
 
+def allowed_commands() -> list[str]:
+    """The programs the model may run, from the policy in use (or the default one)."""
+    from app.policy import Action, Scope
+
+    policy = _config.policy or load_policy(_config.policy_path)
+    names = {r.pattern.rstrip("*") for r in policy.rules
+             if r.scope == Scope.COMMAND and r.action == Action.ALLOW and r.pattern.rstrip("*")}
+    return sorted(n for n in names if n in _config.allowed_commands or "*" not in n)
+
+
+def limits_text(root: pathlib.Path) -> str:
+    """Must-have 11: what CodeMitra's own model must know about this machine, in a few lines (E-128: it did not
+    know which Python it ran or what it may run, and tried refused variants for 10 minutes)."""
+    import sys
+
+    from app.core.tools import project_python
+
+    py = project_python(root)
+    if py == sys.executable:
+        where = "none yet: your first `pip install` makes the project's own .venv, and python / pytest use it"
+    else:
+        p = pathlib.Path(py)
+        try:
+            where = p.relative_to(root).as_posix()
+        except ValueError:
+            where = str(p)
+    osname = {"Windows": "Windows", "Darwin": "macOS", "Linux": "Linux"}.get(platform.system(), platform.system())
+    return ("## This machine (what you can run)\n"
+            f"- {osname}. run_command runs programs directly, not in a shell: `a && b` runs one part at a time; "
+            "pipes (|) and redirects (>) are refused.\n"
+            f"- The project's Python: {where}. pip, python -m pip and playwright all use it.\n"
+            f"- Programs you may run: {', '.join(allowed_commands())}. Anything else is refused: then do not try "
+            "other forms of it; tell the user to run it themselves by typing `! <command>`.\n"
+            "- Before using a library's API, check the installed version with package_info.")
+
+
 def project_venv_python(root: pathlib.Path, create: bool = True) -> str | None:
     """The Python a project's installs go into (E-128): its venv, or a `python` on PATH that tests already use; else
     (only CodeMitra's own Python, which has no pip) a new `<project>/.venv` with pip and pytest, made with uv."""

@@ -11,6 +11,7 @@ Rules the tools enforce (not the prompt):
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -41,9 +42,43 @@ class Workspace:
     # before_write(rel, old_text_or_None, new_text): raise ToolError to refuse (the chat's ask mode uses it)
     before_write: object = None
     journal: list | None = None  # undo entries in the /undo format, when the caller wants them
+    # must-have 12: (absolute path) -> bool, asked before reading anything outside the project; None = never
+    before_read_outside: object = None
+    allowed_outside: set = field(default_factory=set)  # folders the user allowed this session (asked once each)
 
     def __post_init__(self):
         self.root = Path(self.root).resolve()
+
+    def read_path(self, rel: str) -> Path:
+        """A path to READ: inside the project as `path()`; outside it only after the user says yes (read-only,
+        must-have 12). Secret files are never read, inside or out."""
+        try:
+            full = self.path(rel)
+        except ToolError:
+            if not callable(self.before_read_outside):
+                raise
+            raw = (rel or "").strip().strip("\"'")
+            p = Path(os.path.expanduser(raw))
+            full = (p if p.is_absolute() else self.root / p).resolve()
+            if self._inside(full) is not None:
+                raise
+            if is_secret_path(full):
+                raise ToolError(f"'{raw}' looks like a secret (keys, tokens, passwords): CodeMitra never reads it.") \
+                    from None
+            if not full.exists():
+                raise ToolError(f"'{raw}' does not exist.") from None
+            folder = full if full.is_dir() else full.parent
+            if not any(folder == a or a in folder.parents for a in self.allowed_outside):
+                if not self.before_read_outside(str(full)):
+                    raise ToolError(f"The user did not allow reading {full} (outside the project). Work with the "
+                                    "project's files, or ask them for what you need.") from None
+                self.allowed_outside.add(folder)
+            return full
+        return full
+
+    def show(self, full: Path) -> str:
+        """How a path is named to the model: relative inside the project, absolute outside it."""
+        return self.rel(full) if self._inside(full) is not None else str(full)
 
     # ── paths ────────────────────────────────────────────────────────────
     def path(self, rel: str) -> Path:
@@ -123,12 +158,77 @@ def _commit(ws: Workspace, full: Path, new_text: str) -> None:
 
 # ── tools ────────────────────────────────────────────────────────────────────
 
+_SECRET_NAMES = re.compile(r"^(\.env.*|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa|dsa).*|\.netrc|\.git-credentials|"
+                           r"credentials(\.json)?|kaggle\.json|access_token|.*secret.*|.*token.*)$", re.I)
+_SECRET_DIRS = {".ssh", ".aws", ".gnupg", ".kaggle", ".azure", ".docker", ".kube"}
+
+
+def is_secret_path(p: Path) -> bool:
+    """Keys, tokens and password files, and the folders that hold them: never read outside the project."""
+    return bool(_SECRET_NAMES.match(p.name)) or any(part.lower() in _SECRET_DIRS for part in p.parts)
+
+
+# must-have 11: the installed package, read in the project's own Python (not CodeMitra's), never from memory
+_PKG_SCRIPT = r"""
+import importlib, importlib.metadata as md, inspect, json, sys
+name = sys.argv[1].strip()
+out = {"python": sys.executable}
+dist_name = name.split(".")[0]
+try:
+    d = md.distribution(dist_name)
+    out["version"], out["summary"] = d.version, (d.metadata.get("Summary") or "")
+except md.PackageNotFoundError:
+    out["version"] = None
+try:
+    m = importlib.import_module(name.replace("-", "_"))
+    out["file"] = getattr(m, "__file__", "") or ""
+    out["version"] = out.get("version") or str(getattr(m, "__version__", "") or "") or None
+    out["doc"] = "\n".join((inspect.getdoc(m) or "").splitlines()[:6])
+    out["names"] = [n for n in dir(m) if not n.startswith("_")][:60]
+except Exception as exc:
+    out["import_error"] = f"{type(exc).__name__}: {exc}"[:300]
+print(json.dumps(out))
+"""
+PKG_TIMEOUT_S = 30
+
+
+def package_info(ws: Workspace, name: str) -> str:
+    name = (name or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,80}", name):
+        raise ToolError("Give a package or module name, for example 'pygame' or 'fastapi.testclient'.")
+    py = project_python(ws.root)
+    try:
+        p = subprocess.run([py, "-c", _PKG_SCRIPT, name], cwd=ws.root, capture_output=True, text=True,
+                           timeout=PKG_TIMEOUT_S, encoding="utf-8", errors="replace")
+        info = json.loads((p.stdout or "").strip().splitlines()[-1])
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError) as exc:
+        raise ToolError(f"Could not ask the project's Python ({py}) about '{name}': {exc}") from None
+    where = ws.show(Path(info["python"])) if info.get("python") else py
+    if not info.get("version") and info.get("import_error"):
+        return (f"'{name}' is not installed for the project's Python ({where}). Install it with "
+                f"`pip install {name.split('.')[0]}` (it goes into the project's Python), or use what is installed.")
+    lines = [f"{name} {info.get('version') or '(version unknown)'} · installed for {where}"
+             + (f" · {info['summary']}" if info.get("summary") else "")]
+    if info.get("import_error"):
+        lines.append(f"Installed, but importing it failed: {info['import_error']}")
+    if info.get("doc"):
+        lines.append("Module doc: " + info["doc"])
+    if info.get("names"):
+        lines.append("Public names: " + ", ".join(info["names"]))
+    if info.get("file"):
+        lines.append(f"Source: {info['file']} (read_file it for exact signatures)")
+    return "\n".join(lines)
+
+
 def list_files(ws: Workspace, path: str = ".") -> str:
-    base = ws.path(path)
+    base = ws.read_path(path)
     if not base.exists():
         raise ToolError(f"'{path}' does not exist." + ws.suggest(path))
     if base.is_file():
-        return ws.rel(base)
+        return ws.show(base)
+    if ws._inside(base) is None:  # outside the project (allowed): one level, no secrets
+        names = sorted(e.name + ("/" if e.is_dir() else "") for e in base.iterdir() if not is_secret_path(e))
+        return f"{base} (outside the project, read-only)\n" + ("\n".join(names[:300]) or "(empty)")
     lines: list[str] = []
     for dirpath, dirnames, filenames in os.walk(base):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
@@ -145,20 +245,22 @@ def list_files(ws: Workspace, path: str = ".") -> str:
 
 
 def read_file(ws: Workspace, path: str, start: int = 1, end: int = 0) -> str:
-    full = ws.path(path)
+    full = ws.read_path(path)
     if not full.is_file():
         raise ToolError(f"'{path}' is not a file." + ws.suggest(path))
     text = full.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
-    ws.seen[ws.rel(full)] = full.stat().st_mtime
+    name = ws.show(full)
+    if ws._inside(full) is not None:
+        ws.seen[name] = full.stat().st_mtime  # only project files can be edited after a read
     if int(start or 1) <= 1 and not int(end or 0) and len(lines) > OUTLINE_OVER:
-        return outline(ws.rel(full), text)  # D-065 P2: a map of a large file, then read only the part needed
+        return outline(name, text)  # D-065 P2: a map of a large file, then read only the part needed
     start = max(1, int(start or 1))
     end = int(end or 0) or min(len(lines), start + MAX_READ_LINES - 1)
     shown = lines[start - 1:end]
     body = "\n".join(f"{i:4} | {line}" for i, line in enumerate(shown, start))
     more = f"\n… {len(lines) - end} more lines (read_file with start={end + 1})" if end < len(lines) else ""
-    return f"{ws.rel(full)} ({len(lines)} lines)\n{body}{more}" if lines else f"{ws.rel(full)} (empty file)"
+    return f"{name} ({len(lines)} lines)\n{body}{more}" if lines else f"{name} (empty file)"
 
 
 OUTLINE_OVER = 150     # lines: a larger file read without a range gives its outline first (D-065 P2)
@@ -594,12 +696,15 @@ TOOL_SPECS = [
     {"name": "list_files", "description": "List files in the workspace (or a folder).",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}},
     {"name": "read_file", "description": "Read a text file with line numbers (large files: an outline first, then "
-                                        "read a part with start/end). Read a file before editing it.",
+                                        "read a part with start/end). Read a file before editing it. Outside the "
+                                        "project: its full path (asks the user).",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start": {"type": "integer"},
                                                      "end": {"type": "integer"}}, "required": ["path"]}},
     {"name": "search", "description": "Find a regex in files; returns file:line: text.",
      "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}},
                     "required": ["pattern"]}},
+    {"name": "package_info", "description": "An installed library's version and names; check before using its API.",
+     "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "make_dir", "description": "Create a folder (and parent folders) in the project.",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
     {"name": "write_file", "description": "Create a file, or replace a file you have read, with the full content.",

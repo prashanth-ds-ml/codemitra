@@ -107,6 +107,66 @@ for m in api("/api/ps").get("models", []):
         seconds=round(time.time() - t0))
 !nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv"""
 
+# Must-have 10 (D-077): general web search by SearXNG, a metasearch engine, on this notebook (Kaggle's internet, not
+# the laptop's IP). Installed in its own venv in the background while the model downloads; never stops the model.
+SEARX_SETTINGS = """use_default_settings: true
+server:
+  secret_key: "{secret}"
+  bind_address: "127.0.0.1"
+  port: 8888
+  limiter: false
+  public_instance: false
+search:
+  formats: [html, json]
+"""
+
+SEARX_START = '''# Web search for CodeMitra: SearXNG (metasearch) in its own venv, started in the background (about 2 minutes)
+import secrets as _secrets
+SEARX_SCRIPT = """set -e
+cd /kaggle/working
+git clone -q --depth 1 https://github.com/searxng/searxng searxng-src
+python -m venv sxvenv
+sxvenv/bin/pip install -q -U pip setuptools wheel
+sxvenv/bin/pip install -q -r searxng-src/requirements.txt
+cd searxng-src
+SEARXNG_SETTINGS_PATH=/kaggle/working/searx/settings.yml exec ../sxvenv/bin/python -m searx.webapp
+"""
+searx = None
+try:  # web search is extra: nothing here may stop the model from starting
+    os.makedirs("/kaggle/working/searx", exist_ok=True)
+    with open("/kaggle/working/searx/settings.yml", "w") as f:
+        f.write(SEARX_SETTINGS.format(secret=_secrets.token_hex(16)))
+    searx = subprocess.Popen(["bash", "-c", SEARX_SCRIPT], stdout=open("/kaggle/working/searx.log", "w"),
+                             stderr=subprocess.STDOUT)
+    print("SearXNG is installing in the background (log: /kaggle/working/searx.log)")
+except Exception as exc:
+    print("⚠ web search not started:", exc)'''
+
+SEARX_CHECK = '''# Check web search once (an engine test): CodeMitra uses it only if this passed; the model works either way
+search_ok, search_n = False, 0
+for _ in range(60 if searx is not None else 0):
+    if searx.poll() is not None:
+        break
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8888/search?q=python+programming&format=json", timeout=20) as r:
+            found = json.loads(r.read().decode()).get("results", [])
+        search_n, search_ok = len(found), len(found) > 0
+        if search_ok:
+            break
+    except Exception:
+        pass
+    time.sleep(5)
+if search_ok:
+    print(f"✓ web search works: {search_n} results for a test query")
+    say("search", ok=True, results=search_n)
+else:
+    try:
+        tail = open("/kaggle/working/searx.log").read()[-400:]
+    except Exception:
+        tail = ""
+    print("⚠ web search did not start (CodeMitra uses its own sources instead):", tail)
+    say("search", ok=False, detail=tail[-150:])'''
+
 PROXY_HEAD = "%%writefile /kaggle/working/proxy.py\n"
 
 TUNNEL = """# Start the token proxy and a Cloudflare quick tunnel (no account needed), then print the line for your laptop
@@ -178,8 +238,9 @@ while not reason:
         next_report = time.time() + 300
     time.sleep(15)
 say("stopping", reason=reason, up_min=int((time.time() - started) / 60))
-for p in (tunnel, proxy, ollama):
-    p.terminate()
+for p in (tunnel, proxy, ollama, searx):
+    if p is not None:
+        p.terminate()
 print("stopped:", reason)"""
 
 
@@ -193,10 +254,10 @@ def build(auto: dict | None = None) -> dict:
     proxy = (HERE / "proxy.py").read_text(encoding="utf-8")
     settings = (SETTINGS_AUTO.format(model=auto["model"], ctx=int(auto["ctx"]), token=auto["token"],
                                      idle_min=int(auto.get("idle_min", 30)))
-                if auto else SETTINGS_MANUAL) + SAY
+                if auto else SETTINGS_MANUAL) + SAY + f"\nSEARX_SETTINGS = {SEARX_SETTINGS!r}"
     cells = [{"cell_type": "markdown", "metadata": {}, "source": INTRO.splitlines(keepends=True)},
-             _code(settings), _code(INSTALL), _code(START), _code(PULL), _code(PROXY_HEAD + proxy), _code(TUNNEL),
-             _code(WATCH)]
+             _code(settings), _code(INSTALL), _code(START), _code(SEARX_START), _code(PULL), _code(SEARX_CHECK),
+             _code(PROXY_HEAD + proxy), _code(TUNNEL), _code(WATCH)]
     return {"cells": cells, "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python",
                                                         "name": "python3"},
                                          "language_info": {"name": "python"}},

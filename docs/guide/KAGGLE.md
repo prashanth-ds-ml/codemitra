@@ -24,6 +24,9 @@ shows your hours.
   `never`. CodeMitra asks once per session before starting it.
 
 ## How CodeMitra switches
+- **Web search** runs on Kaggle too (SearXNG in your notebook): while it is up, searches cover the whole web.
+- **No internet on your machine:** the turn runs on the laptop, Kaggle keeps running and is used again when you
+  are back online (the status line says `offline`).
 - The status line shows where the model runs: `☁ kaggle · qwen3.5 256K · 28.1 h left` or `💻 laptop · …`.
 - Talking runs on the laptop; work (edits, tests, builds) runs on Kaggle when it is up. It switches between turns,
   never in the middle of one.

@@ -2,7 +2,15 @@
 
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
-## [0.8.4] - 2026-11-15 · a fair learning gate, threads that keep everything, no endless waits
+## [0.8.4] - 2026-11-15 · every must-have built (D-077)
+- **Reads outside the project (must-have 12):** give a full path and CodeMitra asks first, then reads it
+  (read-only; once per folder per session). Secret files (.env, keys, ~/.ssh, ~/.kaggle) are never read.
+- **Knows its machine (must-have 11):** it knows which Python the project uses, which programs it may run and what
+  to do when one is refused; `package_info` checks the installed version of a library before using it.
+- **Whole-web search on Kaggle (must-have 10):** the Kaggle notebook now runs SearXNG, so web search finds news,
+  blogs and docs while Kaggle is up; on the laptop alone it uses its own sources as before.
+- **How each answer went (must-have 9):** at exit, one model call reads your next messages for the answers the
+  simple rules could not judge ("none" when unsure).
 - **Never waits forever (E-081, must-have 13):** if the model sends nothing for 5 minutes, CodeMitra stops the
   turn and says why and what to do (`/free`, or restart Ollama). Before, a stuck Ollama or tunnel hung the chat.
 - **Offline is not "Kaggle ended":** with no internet on your machine, the turn runs on the laptop and Kaggle keeps

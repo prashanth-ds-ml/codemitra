@@ -2817,6 +2817,11 @@ def _chat():
     if notes_now:
         system_prompt += f"\n\n{notes_now}"
         loaded.append("your notes")
+    try:  # must-have 11: which Python, which programs, what to do when one is refused
+        from app.agents import shell as _shell_limits
+        system_prompt += "\n\n" + _shell_limits.limits_text(pathlib.Path(cfg["workspace"]))
+    except Exception:
+        pass
 
     from app.core import threads as threads_mod  # D-071: what was said, decided and left open, per discussion
     if one_codemitra:
@@ -3514,6 +3519,16 @@ def _chat():
                 context=hook_ctx,
             ))
             _rebuild_dashboard(quiet=True)  # the page always shows every session so far (D-041)
+            if signals_mod.unlabelled_pairs(chat.rec.path):  # must-have 9: what the rules left open, one call
+                try:
+                    _n = chat.label_turns(_reply_llm())
+                    if _n:
+                        console.print(Text(f"  noted how {_n} answer(s) went, from your next messages",
+                                           style="m.faint"))
+                except KeyboardInterrupt:
+                    pass
+                except Exception:  # noqa: BLE001 - a label must never block leaving
+                    pass
             if one_codemitra and threads_mod.pending_turns(chat.rec.path):
                 console.print(Text("  remembering this conversation (ctrl+c skips) …", style="m.faint"))
                 try:
