@@ -36,6 +36,33 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Live checks of must-haves 7, 9 and the practice set (2026-11-15, Kaggle 2x T4, qwen3.5:latest at 256K)
+
+**Fair keep/drop gate (must-have 7), one `codemitra improve --chat --remote` round.** Proposed rule: "When answering
+general knowledge questions like 'what is the difference between LoRA and QLoRA?', keep the response concise (under
+180 words)". First runs: behaviour 12/15 -> 14/15 (B5_think_with_me and B13_have_it), writing 2/3, explain 4/4, ideas
+1/2 on both. **The old gate (+2 cases, no category lower) would have kept it.** The repeats of the 2 changed cases:
+B13 passed on both arms in runs 2 and 3; B5 passed on the current rules in runs 2 and 3 and failed on the proposal
+in both. Result: dropped, 0 reliable gains, no losses; the harness stayed at v0. Also seen: at temperature 0 the same
+case flipped between runs on the same rules (B5), so single runs are not reproducible even at temperature 0. The
+rule quoted case B6's own question: a new check now refuses a rule that repeats a test case's words.
+
+**Practice set, first run (20 tasks, `codemitra practice --n 20 --remote`):** 16/20 · python 10/12 · sql 6/8 ·
+learn 11/11 · held_out 5/9 · 11 min. Misread (own tests passed, hidden failed): 0. Wrote no tests of its own: 9.
+Failures: mbpp/68 and spider/network_1/899 answered in 1 step without writing the file; mbpp/432 wrong output
+(got 25, want 20.0); spider/world_1/742 an extra column. Kept in `results/practice.jsonl`.
+
+**Model verdicts at exit (must-have 9), on a copy of the 2026-11-14 session:** 12 turns no rule had judged; the model
+labelled 7 (4 unhappy, 3 happy) and left 5 as none. 6 of the 7 read right by hand ("you add it yourself", "no",
+"it didn't work with python as backend" unhappy; "go with 1", "yes lets try different approaches" happy); 1 doubtful
+(a new question read as unhappy).
+
+**Thread links:** the same session (36 turns) had 31 file and web links; all 31 were kept in its thread.
+
+**SearXNG on Kaggle (must-have 10):** the first start reported "web search did not start": Kaggle's Python 3.13 could
+not make a plain venv (`ensurepip` failed), which Ubuntu 24.04 in WSL could. Fixed: the notebook installs with uv.
+The restart to prove the fix was stopped on this laptop for low memory; the new notebook was already queued on Kaggle.
+
 ## The measuring set (D-068 step 3, D-069): `codemitra score`
 
 Every run appends a row to `results/scores.jsonl` (versions, model, machine, every case).
