@@ -2207,7 +2207,8 @@ def cmd_coach(
     shared: bool = typer.Option(False, "--shared", help="First bring in everyone's shared sessions (D-081)."),
 ) -> None:
     """Layer 2 (D-075): Claude reviews CodeMitra's recorded conversations since the last review and writes a coach
-    report; its rules are queued for `codemitra improve --chat`, where the score decides each one."""
+    report with guidance (D-082): CodeMitra's next `codemitra improve --chat` writes its own rule from it, and the
+    score decides. The chat suggests it when learning is stuck (the last 3 rounds kept nothing)."""
     from app.core import coach as coach_mod
     from app.core import dashboard as D
     from app.core import improve_chat as IC

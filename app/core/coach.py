@@ -3,10 +3,12 @@
     digest  -> from the run records since the last review (no model): every turn in short (what you said, what
                CodeMitra answered, path, phase, machine, time, tools) with the turns that need a look first (your /bad,
                corrections, empty or slow answers, tool errors, answers about the code or the web without looking)
-    review  -> `claude -p` (your Claude Code, no tools) reads the digest and writes the report: findings, rules to
-               test, code fixes, new score cases
-    queue   -> the report's rules go to layer 1's queue (improve_chat): `codemitra score` decides each one, as for
-               CodeMitra's own rules; nothing from Claude enters CodeMitra untested (D-022)
+    review  -> `claude -p` (your Claude Code, no tools) reads the digest and writes the report: findings, GUIDANCE,
+               code fixes for the maintainer, new score cases
+    guide   -> D-082: the coach never writes CodeMitra's rules. Its guidance (the problem, why, what to try, how to
+               check) goes to ~/.codemitra/coach/guidance.jsonl; CodeMitra's next learning round reads it, writes its
+               OWN rule from it, and the fair gate decides; the guidance keeps the result, so we see which advice
+               helped. It runs when CodeMitra is stuck (the last STUCK_ROUNDS rounds kept nothing), or when you ask.
 
 Report: ~/.codemitra/coach/<date>.md (with the digest beside it). The chat header reminds you after REMIND_DAYS days or
 REMIND_TURNS new turns.
@@ -35,15 +37,16 @@ CodeMitra did worse than a good assistant would: wrong or invented answers, answ
 read the code or searched the web, ignoring what the user asked, too long answers, slow or empty
 turns, tool errors, missed signals. Quote the turn for each finding.
 
-Write the report in Markdown with exactly these sections:
+You guide; you do not fix. CodeMitra writes its own rules from your guidance, so never write rule text, prompt
+text or code for it to copy. Write the report in Markdown with exactly these sections:
 ## Findings
 Numbered, most important first: what happened (quote), why it matters, the likely cause.
-## Rules to test
-Short general instructions that would fix a finding by prompt alone, in a fenced block marked `rules`, one JSON
-object per line: {"text": "<under 200 characters, general: never names a file, project or person>", "why": "<finding
-number and one line>"}. Only rules a small model can follow; none when a finding needs code.
-## Code fixes
-What needs a code change in CodeMitra (a missing phase, tool, check or setting), one line each with the finding number.
+## Guidance
+For findings a change in CodeMitra's behaviour could fix: a fenced block marked `guidance`, one JSON object per
+line: {"problem": "<what goes wrong, general>", "why": "<the likely cause>", "try": "<the direction to try, not the
+wording>", "check": "<how to tell it worked>", "finding": <number>}.
+## Code fixes (for the maintainer)
+What needs a code change (a missing phase, tool, check or setting), one line each with the finding number.
 ## New score cases
 Messages worth adding to `codemitra score` so the problem stays measured: the message, what a good answer does.
 Be concrete and short. Do not invent turns that are not in the digest."""
@@ -155,7 +158,16 @@ def turns_since(files: list[Path], since_t: float) -> list[dict]:
 
 
 def reminder(files: list[Path], now: float | None = None) -> str:
-    """The header line when a review is due, else ''."""
+    """The header line when CodeMitra is stuck (D-082: the coach comes in only then), else ''."""
+    from app.core import improve_chat as IC
+    stuck, why = IC.stuck()
+    if stuck:
+        return f"learning is stuck ({why}) · `codemitra coach` asks for guidance"
+    return ""
+
+
+def due_by_time(files: list[Path], now: float | None = None) -> str:
+    """The old time-based reminder (kept for `codemitra coach --status`)."""
     now = now or time.time()
     since = last_review_t()
     n = len(turns_since(files, since))
@@ -252,6 +264,67 @@ def parse_rules(report: str) -> list[dict]:
     return out
 
 
+GUIDANCE_TRIES = 2  # rounds that may use one piece of guidance before it is closed
+
+
+def guidance_path() -> Path:
+    return home() / "guidance.jsonl"
+
+
+def parse_guidance(report: str) -> list[dict]:
+    """The ```guidance block: one JSON object per line -> [{problem, why, try, check, finding}]."""
+    m = re.search(r"```guidance\s*\n(.*?)```", report or "", flags=re.S)
+    out = []
+    for line in (m.group(1).splitlines() if m else []):
+        line = line.strip().rstrip(",")
+        if not line.startswith("{"):
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        g = {k: " ".join(str(d.get(k, "")).split())[:300] for k in ("problem", "why", "try", "check")}
+        if g["problem"] and g["try"]:
+            out.append({**g, "finding": d.get("finding")})
+    return out
+
+
+def _guidance_rows() -> list[dict]:
+    return _rows(guidance_path())
+
+
+def _write_guidance(rows: list[dict]) -> None:
+    guidance_path().parent.mkdir(parents=True, exist_ok=True)
+    guidance_path().write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+
+
+def add_guidance(items: list[dict], report: str = "", now: float | None = None) -> int:
+    rows = _guidance_rows()
+    start = max((int(r.get("id", 0)) for r in rows), default=0)
+    for i, g in enumerate(items, 1):
+        rows.append({**g, "id": start + i, "t": now or time.time(), "report": report, "status": "open",
+                     "tries": []})
+    _write_guidance(rows)
+    return len(items)
+
+
+def open_guidance() -> list[dict]:
+    return [r for r in _guidance_rows() if r.get("status") == "open"]
+
+
+def record_try(gid: int, result: str, rule: str = "", reason: str = "") -> None:
+    """What CodeMitra did with a piece of guidance; it closes after GUIDANCE_TRIES rounds or once a rule is kept."""
+    rows = _guidance_rows()
+    for r in rows:
+        if r.get("id") == gid:
+            r.setdefault("tries", []).append({"t": time.time(), "result": result, "rule": rule, "reason": reason[:300]})
+            if result == "kept":
+                r["status"] = "helped"
+            elif len(r["tries"]) >= GUIDANCE_TRIES:
+                r["status"] = "did_not_help"
+    _write_guidance(rows)
+
+
 def coach(files: list[Path], *, score_row: dict | None = None, ask=run_claude, now: float | None = None,
           say=print) -> dict:
     """One review. Returns {result, report, turns, findings_rules, queued}."""
@@ -276,9 +349,10 @@ def coach(files: list[Path], *, score_row: dict | None = None, ask=run_claude, n
     path.write_text(f"# Coach report · {time.strftime('%Y-%m-%d %H:%M', time.localtime(now))}\n\n"
                     f"{len(turns)} turns reviewed ({flagged} flagged) · digest: {stamp}-digest.md\n\n{report}\n",
                     encoding="utf-8")
-    rules = parse_rules(report)
-    queued = IC.queue_rules(rules, source="coach")
+    guidance = parse_guidance(report)
+    added = add_guidance(guidance, report=str(path), now=now)  # D-082: guidance only, never rules
     _save_state({"last_t": max(t["t"] for t in turns), "last_report": str(path), "date": stamp})
     say(f"Report: {path}")
-    say(f"{len(rules)} rule(s) suggested, {queued} queued for `codemitra improve --chat` (the score decides each one)")
-    return {"result": "done", "report": str(path), "turns": len(turns), "rules": len(rules), "queued": queued}
+    say(f"{added} piece(s) of guidance for CodeMitra's next learning round: it writes its own rule from each, and "
+        f"`codemitra score` decides (`codemitra improve --chat`)")
+    return {"result": "done", "report": str(path), "turns": len(turns), "guidance": added}

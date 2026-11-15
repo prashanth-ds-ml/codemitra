@@ -174,6 +174,24 @@ def tried_rules() -> list[str]:
     return out[-10:]
 
 
+STUCK_ROUNDS = 3  # D-082: this many learning rounds in a row that kept nothing = stuck: the coach may guide
+
+
+def stuck(rounds: int = STUCK_ROUNDS) -> tuple[bool, str]:
+    """(stuck, why): the last `rounds` chat learning rounds all kept nothing (dropped, or no usable proposal)."""
+    tried = [a for a in I.attempts() if a.get("kind") == "chat" and a.get("result") in
+             ("kept", "dropped", "no_proposal")][-rounds:]
+    if len(tried) < rounds or any(a["result"] == "kept" for a in tried):
+        return False, ""
+    return True, f"the last {rounds} learning rounds kept nothing"
+
+
+def guidance_text(g: dict) -> str:
+    return ("\n\nGuidance from a reviewer who read your recorded conversations (write YOUR OWN rule from it; do not "
+            f"copy its words):\n- problem: {g.get('problem')}\n- likely cause: {g.get('why')}\n- try: {g.get('try')}"
+            f"\n- it worked when: {g.get('check')}")
+
+
 def propose_rule(evidence: str, h: H.Harness, llm, instructions: str, tries: int = 2,
                  tried: list[str] | None = None):
     """-> (Change | None, why not)."""
@@ -250,6 +268,14 @@ def decide(base_runs: list[dict], cand_runs: list[dict], categories: dict[str, s
         return False, f"{len(hit)} {what}passed reliably in {runs} runs, needs {need}{got}", detail
     extra = f"; held out: +{len(held)}" if held else ""
     return True, f"fixed {', '.join(hit)} in most of {runs} runs, nothing lost{extra}", detail
+
+
+def _record_guidance(entry: dict) -> None:
+    """The guidance a round used keeps what came of it (D-082: we see which advice helped)."""
+    if entry.get("guidance"):
+        from app.core import coach as CO
+        CO.record_try(entry["guidance"], entry.get("result", ""), rule=str(entry.get("change", "")),
+                      reason=str(entry.get("reason", "")))
 
 
 def has_held_out() -> bool:
@@ -416,12 +442,18 @@ def improve_chat(*, proposer, make_runner: Callable[[H.Harness, Path], S.Runner]
             "first, or mark wrong answers with /bad <why> in the chat.")
         return entry
     else:
+        from app.core import coach as CO
+        guide = next(iter(CO.open_guidance()), None)  # D-082 step 5: CodeMitra acts on the coach's guidance itself
+        if guide:
+            entry["guidance"] = guide["id"]
+            say(f"Using the coach's guidance #{guide['id']}: {guide['problem']}")
         say(f"Evidence: {len(failures)} failed case(s) from the score of {entry['evidence']['score'] or '-'}, "
             f"{len(signals)} signal(s) from your conversations. Asking {entry['proposer']} for a rule ...")
-        change, why = propose_rule(evidence_text(failures, signals), current, proposer, instructions(current),
-                                   tried=tried_rules())
+        change, why = propose_rule(evidence_text(failures, signals) + (guidance_text(guide) if guide else ""),
+                                   current, proposer, instructions(current), tried=tried_rules())
     if not change:
         entry.update(result="no_proposal", reason=why)
+        _record_guidance(entry)
         I.log_attempt(entry)
         say(f"No usable proposal: {why}")
         return entry
@@ -466,6 +498,7 @@ def improve_chat(*, proposer, make_runner: Callable[[H.Harness, Path], S.Runner]
     if keep:
         H.save(cand_h, f"{change.describe()} ({reason}; codemitra improve --chat)")
         entry["new_version"] = current.version + 1
+    _record_guidance(entry)
     I.log_attempt(entry)
     say(f"{'Kept' if keep else 'Dropped'}: {reason}")
     if keep:

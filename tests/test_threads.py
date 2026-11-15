@@ -147,3 +147,44 @@ def test_a_history_line_without_a_date_is_kept(tmp_path):
     T.save({"slug": "t", "title": "T", "said": "second"}, tmp_path)
     T.save({"slug": "t", "title": "T", "said": "third"}, tmp_path)
     assert [h["said"] for h in T.load(tmp_path)[0]["history"]] == ["first", "second"]
+
+
+
+# -- links are kept (partial -> done, 2026-11-15) --
+
+def test_links_come_from_the_conversation_not_the_summary(tmp_path):
+    """A small model dropped the links from its summary; they are taken from the turns themselves now."""
+    rec, root = tmp_path / "chat.jsonl", tmp_path / "th"
+    _record(rec, [("read https://fastapi.tiangolo.com/tutorial/ for the ratings api",
+                   "Done: the route is in api/ratings.py:14, tests in tests/test_ratings.py.")])
+    reply = '[{"slug": "ratings-api", "title": "Ratings API", "said": "We built the ratings route.", "decided": "-"}]'
+
+    class LLM:
+        def invoke(self, messages):
+            return AIMessage(content=reply)
+
+    T.summarize(LLM(), rec, "proj", root)
+    links = T.load(root)[0]["links"]
+    assert links == ["https://fastapi.tiangolo.com/tutorial/", "api/ratings.py:14", "tests/test_ratings.py"]
+    assert "Links: https://fastapi.tiangolo.com/tutorial/" in T.relevant_text("the ratings api again", root)
+
+
+def test_links_are_only_ever_added(tmp_path):
+    T.save({**WEB, "links": ["https://a.example/1"]}, tmp_path)
+    T.save({**WEB, "said": "later", "links": ["https://b.example/2", "https://a.example/1"]}, tmp_path)
+    assert T.load(tmp_path)[0]["links"] == ["https://a.example/1", "https://b.example/2"]
+    T.save({**WEB, "said": "even later"}, tmp_path)                       # a summary with no links keeps them
+    assert T.load(tmp_path)[0]["links"] == ["https://a.example/1", "https://b.example/2"]
+
+
+def test_with_two_threads_each_gets_the_links_of_its_own_turns(tmp_path):
+    turns = [{"user": "the ratings web app: see https://fastapi.tiangolo.com", "answer": "ratings stored in db.py"},
+             {"user": "the snake game speed", "answer": "snake speed is in snake/game.py:40"}]
+    web = T._links_for({"title": "Ratings web app", "said": "ratings web app with fastapi"}, turns, alone=False)
+    snake = T._links_for({"title": "Snake speed", "said": "snake game speed"}, turns, alone=False)
+    assert web == ["https://fastapi.tiangolo.com", "db.py"] and snake == ["snake/game.py:40"]
+
+
+def test_codemitra_no_longer_says_threads_lose_links():
+    from app.core import chat as C
+    assert "lose details such as links" not in C.ABOUT_CODEMITRA

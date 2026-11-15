@@ -59,26 +59,32 @@ def test_only_conversations_are_reviewed_not_score_or_plan_runs(tmp_path):
     assert len(CO.turns_since([score], 0)) == 0
 
 
-def test_a_review_writes_the_report_and_queues_its_rules_for_layer_1(tmp_path):
-    seen = []
-    report = """## Findings
+REPORT = """## Findings
 1. "pull information" was answered from memory.
-## Rules to test
-```rules
-{"text": "When the user asks you to find or pull information, search the web first.", "why": "1"}
-{"text": "Never mention the snake game.", "why": "names the test set: refused"}
+## Guidance
+```guidance
+{"problem": "asked to find information, it answered from memory", "why": "the decide step picks talk", "try": "make finding information a reason to look it up", "check": "B-cases with 'pull information' search", "finding": 1}
+{"problem": "", "try": "x"}
 ```
-## Code fixes
+## Code fixes (for the maintainer)
 - none
 ## New score cases
 - "pull information on X": searches."""
+
+
+def test_a_review_writes_guidance_never_rules(tmp_path):
+    """D-082: the coach guides; CodeMitra writes its own rule from the guidance."""
+    seen = []
+    report = REPORT
     rec = _session(tmp_path)
     res = CO.coach([rec], ask=lambda text: seen.append(text) or report, say=lambda t: None)
-    assert res["result"] == "done" and res["turns"] == 4 and res["rules"] == 2 and res["queued"] == 1
+    assert res["result"] == "done" and res["turns"] == 4 and res["guidance"] == 1
     assert seen[0].startswith(CO.COACH_PROMPT) and "you marked it /bad: you did not search" in seen[0]
+    assert "never write rule text" in CO.COACH_PROMPT and "## Rules to test" not in CO.COACH_PROMPT
     assert "## Findings" in open(res["report"], encoding="utf-8").read()
-    assert [r["text"] for r in IC.queued_rules()] == [
-        "When the user asks you to find or pull information, search the web first."]
+    assert IC.queued_rules() == []                                         # nothing enters as a rule
+    g = CO.open_guidance()
+    assert len(g) == 1 and g[0]["problem"].startswith("asked to find information") and g[0]["status"] == "open"
     # the next review only sees new turns
     again = CO.coach([rec], ask=lambda text: report, say=lambda t: None)
     assert again["result"] == "skipped"
@@ -93,13 +99,42 @@ def test_a_failed_claude_call_changes_nothing(tmp_path):
     assert CO.last_review_t() == 0 and IC.queued_rules() == []
 
 
-def test_the_reminder_comes_after_a_week_or_40_turns(tmp_path):
+def test_the_reminder_comes_only_when_learning_is_stuck(tmp_path):
+    """D-082: the coach comes in when CodeMitra stops improving, not on a timer."""
     files = [_session(tmp_path)]
-    assert CO.reminder(files) == ""                                         # 4 turns, never reviewed
-    many = _record(tmp_path / "s2" / "chat-1.jsonl", [(f"question {i}", "answer", []) for i in range(40)])
-    assert CO.reminder([many]) == "coach: no review yet, 40 new turns · `codemitra coach`"
-    CO._save_state({"last_t": time.time() - 8 * 86400})
-    assert CO.reminder(files).startswith("coach: last review 8 days ago, 4 new turns")
+    assert CO.reminder(files) == ""
+    for result in ("dropped", "no_proposal"):
+        I.log_attempt({"kind": "chat", "t": time.time(), "result": result})
+    assert CO.reminder(files) == ""                                         # 2 rounds: not stuck yet
+    I.log_attempt({"kind": "chat", "t": time.time(), "result": "dropped"})
+    assert CO.reminder(files).startswith("learning is stuck (the last 3 learning rounds kept nothing)")
+    I.log_attempt({"kind": "chat", "t": time.time(), "result": "kept"})
+    assert CO.reminder(files) == ""
+
+
+def test_codemitra_writes_its_own_rule_from_the_guidance_and_the_guidance_keeps_the_result(tmp_path):
+    from tests.test_improve_chat import BASE, BETTER, Scores, _row, _rule, _run
+    CO.add_guidance(CO.parse_guidance(REPORT))
+
+    class P:
+        model, seen = "qwen3.5:4b", []
+
+        def invoke(self, messages):
+            P.seen.append(messages[-1].content)
+            return AIMessage(content=_rule("When the user asks to find information, look it up before answering."))
+    entry = _run(P(), Scores(BASE, BETTER), _row(BASE, [("B3_how_are_you", "behaviour", "x")]))
+    assert "Guidance from a reviewer" in P.seen[0] and "do not copy its words" in P.seen[0]
+    assert entry["guidance"] == 1 and entry["source"] == "mitra"            # CodeMitra's own rule
+    g = [r for r in CO._guidance_rows() if r["id"] == 1][0]
+    assert g["status"] == "helped" and g["tries"][0]["result"] == "kept"
+
+
+def test_guidance_that_did_not_help_twice_is_closed(tmp_path):
+    CO.add_guidance(CO.parse_guidance(REPORT))
+    CO.record_try(1, "dropped")
+    assert CO.open_guidance()
+    CO.record_try(1, "no_proposal")
+    assert CO.open_guidance() == [] and CO._guidance_rows()[0]["status"] == "did_not_help"
 
 
 def test_rules_block_parsing_is_tolerant():

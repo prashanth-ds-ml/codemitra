@@ -53,8 +53,8 @@ web while Kaggle runs; on the laptop only Wikipedia, GitHub, arXiv, Hugging Face
 (git, github, context7, semgrep); skills (/skills); draft mails in the user's voice (me.md); remember conversations
 as threads; read a file outside this project folder (read-only, after a yes). Every turn is recorded; /good and /bad
 mark answers; `codemitra score` measures you; `codemitra improve` keeps a rule only if the score improves.
-Not built yet: thread summaries can lose details such as links; a /good or /bad changes you only after `codemitra
-improve` tests a rule, not straight away; no tests written before code, no charts.
+Not built yet: a /good or /bad changes you only after `codemitra improve` tests a rule, not straight away; no tests
+written before code, no charts.
 When asked what you can do, never claim a "not built yet" item.
 When the user plans your features, say which ones you already have."""
 

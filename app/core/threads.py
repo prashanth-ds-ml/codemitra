@@ -57,6 +57,20 @@ def _slug(text: str) -> str:
 
 
 HISTORY = "## Earlier"
+LINKS_SHOWN = 8  # the newest links that come with a thread into the prompt; the file keeps every one
+# A thread's links are taken from the conversation itself, never from the model's summary (a small model drops or
+# changes them): web addresses and file paths, with a line number when there is one.
+_URL_RE = re.compile(r"https?://[^\s)\]>\"'`|,]+")
+_FILE_RE = re.compile(r"(?<![\w/.-])(?:[\w.-]+/)*[\w-]+\.(?:py|md|toml|json|ya?ml|txt|js|ts|tsx|jsx|html|css|sql|"
+                      r"ipynb|csv)(?::\d+)?(?![\w/])")
+
+
+def links_in(text: str) -> list[str]:
+    """Web addresses and file paths in a piece of conversation, in order, each once."""
+    found = [u.rstrip(".;:") for u in _URL_RE.findall(text or "")]
+    rest = _URL_RE.sub(" ", text or "")
+    found += _FILE_RE.findall(rest)
+    return list(dict.fromkeys(found))
 _HIST_RE = re.compile(r"^- (.*?) · said: (.*?) · decided: (.*?) · open: (.*)$", re.M)  # updated may be "-"
 
 
@@ -68,9 +82,12 @@ def _read(f: Path) -> dict | None:
     meta = dict(re.findall(r"^(title|project|updated): (.*)$", text, re.M))
     body = dict(re.findall(r"^(Said|Decided|Open): (.*)$", text, re.M))
     history = [{"updated": u, "said": s, "decided": d, "open": o} for u, s, d, o in _HIST_RE.findall(text)]
+    links_line = re.search(r"^Links: (.*)$", text, re.M)
+    links = [x.strip() for x in links_line.group(1).split(" | ") if x.strip()] if links_line else []
     return {"slug": f.stem, "title": meta.get("title", f.stem), "project": meta.get("project", "-"),
             "updated": meta.get("updated", ""), "said": body.get("Said", ""),
-            "decided": body.get("Decided", "-"), "open": body.get("Open", "-"), "history": history}
+            "decided": body.get("Decided", "-"), "open": body.get("Open", "-"), "history": history,
+            "links": links}
 
 
 def load(root: Path | None = None) -> list[dict]:
@@ -103,9 +120,11 @@ def save(thread: dict, root: Path | None = None) -> Path:
     decided = _one_line(thread.get("decided"))
     if _blank(decided) and old and not _blank(old["decided"]):
         decided = old["decided"]
+    links = list(dict.fromkeys([*(old or {}).get("links", []), *(thread.get("links") or [])]))  # only ever added
     text = (f"---\ntitle: {title}\nproject: {project}\nupdated: {time.strftime('%Y-%m-%d %H:%M')}\n---\n"
             f"Said: {_one_line(thread.get('said'))}\nDecided: {decided or '-'}\n"
-            f"Open: {_one_line(thread.get('open')) or '-'}\n")
+            f"Open: {_one_line(thread.get('open')) or '-'}\n"
+            + (f"Links: {' | '.join(links)}\n" if links else ""))
     if history:
         text += f"\n{HISTORY}\n" + "".join(
             f"- {h['updated'] or '-'} · said: {_one_line(h['said'])} · decided: {_one_line(h['decided']) or '-'}"
@@ -148,9 +167,11 @@ def relevant_text(message: str, root: Path | None = None, max_chars: int = RELEV
             d = h["decided"]
             if not _blank(d) and d != t["decided"] and d not in earlier:
                 earlier.append(d)
+        shown = t.get("links", [])[-LINKS_SHOWN:]
         block = (f"## Thread: {t['title']} ({t['project']}, {t['updated'][:10]})\nSaid: {t['said']}\n"
                  f"Decided: {t['decided']}\nOpen: {t['open']}"
-                 + (f"\nDecided earlier: {' | '.join(e[:200] for e in earlier[:3])}" if earlier else ""))
+                 + (f"\nDecided earlier: {' | '.join(e[:200] for e in earlier[:3])}" if earlier else "")
+                 + (f"\nLinks: {' | '.join(shown)}" if shown else ""))
         if used + len(block) > max_chars:
             break
         out.append(block)
@@ -214,6 +235,18 @@ def parse_threads(text: str) -> list[dict]:
     return [d for d in data if isinstance(d, dict) and (d.get("title") or d.get("slug")) and d.get("said")]
 
 
+def _links_for(thread: dict, turns: list[dict], alone: bool) -> list[str]:
+    """The links of the turns this thread is about: all of them when the conversation made one thread, else those
+    of the turns sharing at least two words with the thread's summary."""
+    about = _words(" ".join(str(thread.get(k) or "") for k in ("title", "said", "decided", "open")))
+    out = []
+    for t in turns:
+        text = f"{t['user']}\n{t['answer']}"
+        if alone or len(_words(text) & about) >= 2:
+            out += links_in(text)
+    return list(dict.fromkeys(out))
+
+
 def summarize(llm, record: Path, project: str, root: Path | None = None) -> list[str]:
     """Turn the record's new turns into threads (one model call). Returns the titles written."""
     root = root or threads_dir()
@@ -228,7 +261,9 @@ def summarize(llm, record: Path, project: str, root: Path | None = None) -> list
     reply = llm.invoke([HumanMessage(content=SUMMARIZE_PROMPT.format(existing=existing, project=project,
                                                                      conversation=convo))])
     written = []
-    for t in parse_threads(str(getattr(reply, "content", "") or "")):
+    found = parse_threads(str(getattr(reply, "content", "") or ""))
+    for t in found:
+        t["links"] = _links_for(t, turns, alone=len(found) == 1)
         save(t, root)
         written.append(str(t.get("title") or t.get("slug")))
     _mark_done(record, max(x["t"] for x in turns), root)
