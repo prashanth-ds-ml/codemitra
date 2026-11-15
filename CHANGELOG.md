@@ -2,6 +2,17 @@
 
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
+## [Unreleased]
+- **A promise is not an answer (E-133):** "I'll create `query.sql` now" with nothing done is sent back once with
+  "do it now"; tool calls in Qwen's XML form, or written only in the thinking, are run; old thinking is not sent back.
+- **Shorter test output:** a long failing run shows the first failure's end and the FAILED lines, not every line.
+- **`codemitra practice --repeats 3`:** pass^3, the tasks that flip, a margin, and a task-by-task comparison with
+  the last run.
+- **Rules earn their keep:** each kept rule counts how often its own cases pass again; a rule that keeps failing
+  them is retired (`codemitra harness` shows the counts).
+- **`scripts/coder_parser_tag.py`:** a qwen3.5 tag with Ollama's qwen3-coder parser, to compare (ollama#14493);
+  Kaggle makes it too.
+
 ## [0.8.5] - 2026-11-15 · codemitra improve works on a friend's machine
 - **`codemitra improve` (E-132, issue #12):** errors that come from your machine (a refused program, a missing
   package or interpreter, no network) are named as such and never get a rule like "retry 3 times"; the

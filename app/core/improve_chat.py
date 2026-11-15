@@ -285,6 +285,75 @@ def decide(base_runs: list[dict], cand_runs: list[dict], categories: dict[str, s
     return True, f"fixed {', '.join(hit)} in most of {runs} runs, nothing lost{extra}", detail
 
 
+RETIRE_HARMFUL = 2  # quick win 6 (ACE's helpful/harmful counters): a rule whose own cases failed again this often,
+#                     more often than they passed, is taken out (it got in by luck, or stopped helping)
+
+
+def stats_path() -> Path:
+    return H.home() / "harness" / "rule_stats.json"
+
+
+def rule_stats() -> dict[str, dict]:
+    """{rule text: {"fixed": [case ids it was kept for], "helpful": n, "harmful": n, "kept": date}}."""
+    try:
+        data = json.loads(stats_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_stats(stats: dict) -> None:
+    p = stats_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(stats, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(p)
+
+
+def note_kept(rule: str, fixed: list[str], stats: dict | None = None) -> dict:
+    """A rule the gate kept starts with one helpful count: the cases it fixed."""
+    stats = rule_stats() if stats is None else stats
+    stats[rule] = {"fixed": sorted(fixed), "helpful": 1, "harmful": 0, "kept": time.strftime("%Y-%m-%d")}
+    _save_stats(stats)
+    return stats
+
+
+def count_rules(rules: list[str], runs: list[dict], stats: dict | None = None) -> tuple[dict, list[str]]:
+    """Update the counters from a later score of the current rules (`runs`: {case id: passed} per run). For each kept
+    rule, its own cases (the ones it was kept for): passing in most runs -> helpful + 1; failing in every run -> harmful
+    + 1 (one run is noise). Returns (stats, the rules to retire)."""
+    stats = rule_stats() if stats is None else stats
+    retire = []
+    for rule in rules:
+        s = stats.get(rule)
+        if not s or not s.get("fixed"):
+            continue
+        seen = [r[i] for r in runs for i in s["fixed"] if i in r]
+        if not seen:
+            continue
+        if sum(seen) * 2 > len(seen):
+            s["helpful"] = s.get("helpful", 0) + 1
+        elif not any(seen):
+            s["harmful"] = s.get("harmful", 0) + 1
+        if s.get("harmful", 0) >= RETIRE_HARMFUL and s["harmful"] > s.get("helpful", 0):
+            retire.append(rule)
+    _save_stats(stats)
+    return stats, retire
+
+
+def retire_rules(retire: list[str], say=print) -> int | None:
+    """Take retired rules out of the active harness (a new version, so `codemitra harness revert` undoes it)."""
+    h = H.load()
+    keep = [r for r in h.rules if r not in retire]
+    if len(keep) == len(h.rules):
+        return None
+    h.rules = keep
+    H.save(h, f"retired {len(retire)} rule(s): their own cases failed again in {RETIRE_HARMFUL}+ later rounds")
+    for r in retire:
+        say(f"Retired a rule (its cases failed again): {r}")
+    return h.version
+
+
 def _record_guidance(entry: dict) -> None:
     """The guidance a round used keeps what came of it (D-082: we see which advice helped)."""
     if entry.get("guidance"):
@@ -510,9 +579,17 @@ def improve_chat(*, proposer, make_runner: Callable[[H.Harness, Path], S.Runner]
     keep, reason, detail = decide(base_runs, cand_runs, categories, targets, min_gain)
     entry.update(base=base["score"], candidate=cand["score"], result="kept" if keep else "dropped", reason=reason,
                  gate=detail, records=str(runs))
+    stats, retire = count_rules(current.rules, base_runs)  # quick win 6: the kept rules' own cases, scored again
     if keep:
         H.save(cand_h, f"{change.describe()} ({reason}; codemitra improve --chat)")
         entry["new_version"] = current.version + 1
+        if change.kind == "rule":
+            saved = H.load().rules  # the text as the harness keeps it (cut to fit, if it was long)
+            note_kept(saved[-1] if saved else change.text,
+                      detail.get("targeted_gains") or detail.get("gains") or [], stats)
+    if retire:
+        entry["retired"] = retire
+        entry["new_version"] = retire_rules(retire, say) or entry.get("new_version")
     _record_guidance(entry)
     I.log_attempt(entry)
     say(f"{'Kept' if keep else 'Dropped'}: {reason}")

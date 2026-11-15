@@ -657,6 +657,37 @@ def test_summary(out: str) -> str:
     return lines[-1].strip() if lines else ""
 
 
+FAIL_TAIL_LINES = 30   # quick win 4: of a long failing run the model sees the first failure's last lines
+SHORT_OUTPUT_LINES = 40  # shorter output is shown as it is
+_SECTION = re.compile(r"^_{3,} .+ _{3,}$")
+
+
+def failing_part(out: str, ok: bool) -> str:
+    """What the model needs from a long test run (the 'context rot' finding: long, similar-looking output hurts small
+    models): a pass is its result line; a pytest failure is the first failure's last FAIL_TAIL_LINES lines (the
+    assertion and where it failed), the FAILED lines and the result line; other output its last lines. Short output
+    is unchanged; the full output is kept in the spill file."""
+    lines = (out or "").splitlines()
+    if len(lines) <= SHORT_OUTPUT_LINES:
+        return out
+    summary = test_summary(out)
+    if ok:
+        return summary or lines[-1]
+    starts = [i for i, ln in enumerate(lines) if _SECTION.match(ln)]
+    if starts:
+        first = starts[0]
+        end = next((i for i in range(first + 1, len(lines)) if _SECTION.match(lines[i]) or lines[i].startswith("==")),
+                   len(lines))
+        block = lines[first:end]
+        if len(block) > FAIL_TAIL_LINES + 1:
+            block = [block[0], f"… {len(block) - 1 - FAIL_TAIL_LINES} lines cut …"] + block[-FAIL_TAIL_LINES:]
+        failed = [ln for ln in lines if ln.startswith(("FAILED ", "ERROR "))]
+        more = f"({len(starts) - 1} more failure(s) not shown)" if len(starts) > 1 else ""
+        return "\n".join(block + [""] + failed[:20] + [x for x in (more, summary) if x])
+    cut = len(lines) - FAIL_TAIL_LINES
+    return f"… {cut} lines cut …\n" + "\n".join(lines[-FAIL_TAIL_LINES:])
+
+
 @dataclass
 class TestRun:
     passed: bool
@@ -708,10 +739,10 @@ def run_tests(ws: Workspace, command: str | None = None, extra: list[str] | None
         f = ws.spill_dir / f"tests-{int(time.time() * 1000)}.txt"
         f.write_text(out, encoding="utf-8")
         full_path = str(f)
-    shown = out
-    if len(out) > MAX_OUTPUT_CHARS:
-        head, tail = out[: MAX_OUTPUT_CHARS // 3], out[-(MAX_OUTPUT_CHARS * 2 // 3):]
-        shown = f"{head}\n… {len(out) - len(head) - len(tail)} characters cut …\n{tail}"
+    shown = failing_part(out, ok)
+    if len(shown) > MAX_OUTPUT_CHARS:
+        head, tail = shown[: MAX_OUTPUT_CHARS // 3], shown[-(MAX_OUTPUT_CHARS * 2 // 3):]
+        shown = f"{head}\n… {len(shown) - len(head) - len(tail)} characters cut …\n{tail}"
     return TestRun(ok, last, shown, full_path, secs)
 
 

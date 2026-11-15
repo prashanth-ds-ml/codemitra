@@ -461,8 +461,12 @@ def cmd_harness(
     if h.note:
         console.print(Text(f"  why: {h.note}", style="m.dim"))
     console.print(Text("  rules:" + ("" if h.rules else " none yet"), style="m.dim"))
+    from app.core import improve_chat as IC
+    stats = IC.rule_stats()
     for r in h.rules:
-        console.print(Text(f"    - {r}", style="m.text"))
+        s = stats.get(r)
+        counts = f"  (helped {s.get('helpful', 0)} · hurt {s.get('harmful', 0)})" if s else ""
+        console.print(Text(f"    - {r}{counts}", style="m.text"))
     for name, desc in h.tools.items():
         console.print(Text(f"  tool {name}: {desc}", style="m.text"))
     console.print(Text("  limits: " + ", ".join(f"{k}={v}" for k, v in h.limits.items()), style="m.dim"))
@@ -2405,6 +2409,8 @@ def cmd_practice(
     remote: bool = typer.Option(False, "--remote", help="Run on the remote GPU in use (Kaggle) instead of the laptop."),
     ctx: int = typer.Option(0, "--ctx", help="Context size for this run (0 = your setting)."),
     arch: str = typer.Option("phased", "--arch", help="How CodeMitra handles a message (as `codemitra score`)."),
+    repeats: int = typer.Option(1, "--repeats", help="Run every task this many times (3: pass^3 and the tasks that "
+                                "flip; one run moves a few tasks by noise)."),
 ) -> None:
     """Coding practice (D-078 step 5): CodeMitra solves small Python and SQL tasks in a fresh folder, writes its own
     tests, and a hidden check decides; results in results/practice.jsonl."""
@@ -2437,13 +2443,18 @@ def cmd_practice(
         mark = "✓" if r.passed else "✗"
         why = "" if r.passed else ("  misread: its own tests passed · " if r.misread else "  ") + r.detail.splitlines()[-1][:90] \
             if r.detail else ""
-        say(f"  {mark} {r.kind:6} {r.split:8} {r.id:28} {r.seconds:.0f}s · {r.steps} steps{why}",
+        run_no = f"run {r.run} " if repeats > 1 else ""
+        say(f"  {mark} {run_no}{r.kind:6} {r.split:8} {r.id:28} {r.seconds:.0f}s · {r.steps} steps{why}",
             "m.tool" if r.passed else "m.err")
 
-    row = P.run(tasks, runner, model=model_name, on_task=line)
+    prev = P.last_row(model_name)
+    row = P.run(tasks, runner, model=model_name, on_task=line, repeats=max(1, repeats))
     console.print()
     for ln in P.report(row).splitlines():
         say("  " + ln, "m.tool")
+    vs = P.compare(prev, row)
+    if vs:
+        say("  " + vs, "m.tool")
     say(f"  kept in {P.results_path()} · records: {runner.records}", "m.faint")
 
 

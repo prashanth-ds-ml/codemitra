@@ -21,7 +21,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from app.agents.limits import RepeatGuard
 from app.core import harness as H
 from app.core import tools as T
-from app.core.parse import text_tool_calls
+from app.core.parse import for_model, text_tool_calls
 from app.core.scrub import scrub_obj
 
 SYSTEM_PROMPT = """You are CodeMitra, a coding agent. You work inside one project folder using tools.
@@ -197,7 +197,7 @@ def call_model(bound, messages: list, timeout: float):
     import concurrent.futures
 
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = pool.submit(bound.invoke, messages)
+    future = pool.submit(bound.invoke, for_model(messages))  # E-133: old thinking is not sent back
     try:
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
@@ -357,8 +357,10 @@ def solve(
         thinking = (getattr(reply, "additional_kwargs", None) or {}).get("reasoning_content", "")
         text = _strip_think(reply.content if isinstance(reply.content, str) else "")
         parse_error = ""
-        if not reply.tool_calls and text:
-            calls, parse_error = text_tool_calls(text, known)
+        if not reply.tool_calls and (text or thinking):
+            calls, parse_error = text_tool_calls(text, known) if text else ([], "")
+            if not calls and not parse_error and thinking:
+                calls, _ = text_tool_calls(thinking, known)  # E-133: the call was written in the thinking only
             if calls:  # the model wrote the call as text: run it as a real call
                 reply = AIMessage(content=reply.content, tool_calls=calls,
                                   usage_metadata=getattr(reply, "usage_metadata", None))

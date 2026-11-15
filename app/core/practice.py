@@ -363,6 +363,7 @@ class Result:
     own_ok: bool | None = None  # its last test run in the turn passed (None: never ran)
     seconds: float = 0.0
     steps: int = 0
+    run: int = 1            # which repeat (quick win 5: --repeats)
 
     @property
     def misread(self) -> bool:
@@ -425,23 +426,25 @@ def results_path() -> Path:
 
 
 def run(tasks: list[Task], runner, *, model: str = "", on_task=lambda r: None, results: Path | None = None,
-        timeout_s: float = TASK_TIMEOUT_S) -> dict:
-    """Solve every task, append one row to results/practice.jsonl (the task ids and outcomes only: no task text),
-    return it."""
+        timeout_s: float = TASK_TIMEOUT_S, repeats: int = 1) -> dict:
+    """Solve every task (`repeats` times each: one run moves a few tasks by noise even at temperature 0), append one
+    row to results/practice.jsonl (the task ids and outcomes only: no task text), return it."""
     import json
     from dataclasses import asdict
 
     from app.core import score as S
 
     t0, out = time.monotonic(), []
-    for task in tasks:
-        r = solve(task, runner, timeout_s)
-        on_task(r)
-        out.append(r)
+    for n in range(1, max(1, repeats) + 1):
+        for task in tasks:
+            r = solve(task, runner, timeout_s)
+            r.run = n
+            on_task(r)
+            out.append(r)
     row = {"t": time.time(), "date": time.strftime("%Y-%m-%d %H:%M"), "mitra_version": S.mitra_version(),
            "harness_version": runner.harness.version, "model": model, "arch": runner.arch,
            "backend": runner.backend, "num_ctx": runner.num_ctx, "seconds": round(time.monotonic() - t0, 1),
-           "records": str(runner.records), "summary": summary(out),
+           "repeats": max(1, repeats), "records": str(runner.records), "summary": summary(out),
            "results": [{**asdict(r), "misread": r.misread} for r in out]}
     path = results or results_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -451,24 +454,88 @@ def run(tasks: list[Task], runner, *, model: str = "", on_task=lambda r: None, r
 
 
 def summary(results: list[Result]) -> dict:
+    """Counts over every attempt; with repeats also per task: pass^k (passed in every run) and flaky (some runs)."""
     def frac(rs):
         return [sum(r.passed for r in rs), len(rs)]
+    by_task: dict[str, list[bool]] = {}
+    for r in results:
+        by_task.setdefault(r.id, []).append(r.passed)
     return {"all": frac(results),
             "python": frac([r for r in results if r.kind == "python"]),
             "sql": frac([r for r in results if r.kind == "sql"]),
             "held_out": frac([r for r in results if r.split == "held_out"]),
             "misread": sum(r.misread for r in results),
-            "no_own_tests": sum(not r.own_tests for r in results)}
+            "no_own_tests": sum(not r.own_tests for r in results),
+            "tasks": len(by_task),
+            "pass_all": sum(all(v) for v in by_task.values()),
+            "flaky": sorted(i for i, v in by_task.items() if any(v) and not all(v))}
+
+
+def margin(passed: int, n: int) -> float:
+    """The 95% margin of a pass rate, in points (normal approximation): 5/9 is about ±32, 16/20 about ±18."""
+    if n <= 0:
+        return 0.0
+    p = passed / n
+    return round(196 * math.sqrt(max(p * (1 - p), 0.25 / n) / n), 0)
+
+
+def task_rates(row: dict) -> dict[str, float]:
+    """{task id: share of its runs that passed} of a results row."""
+    seen: dict[str, list[bool]] = {}
+    for r in row.get("results", []):
+        seen.setdefault(r["id"], []).append(bool(r["passed"]))
+    return {i: sum(v) / len(v) for i, v in seen.items()}
+
+
+def compare(prev: dict | None, row: dict) -> str:
+    """The same tasks, task by task (paired: the tasks are the same, so only the flips count), against an earlier
+    row: "vs 2026-11-15 12:28: 2 better (a, b), 1 worse (c), 17 the same", or "" with no earlier row."""
+    if not prev:
+        return ""
+    a, b = task_rates(prev), task_rates(row)
+    both = sorted(a.keys() & b.keys())
+    if not both:
+        return ""
+    better = [i for i in both if b[i] > a[i]]
+    worse = [i for i in both if b[i] < a[i]]
+    def names(xs):
+        return f" ({', '.join(xs[:4])}{', …' if len(xs) > 4 else ''})" if xs else ""
+    return (f"vs {prev.get('date', '?')} (harness v{prev.get('harness_version', '?')}): {len(better)} better"
+            f"{names(better)}, {len(worse)} worse{names(worse)}, {len(both) - len(better) - len(worse)} the same")
+
+
+def last_row(model: str, path: Path | None = None) -> dict | None:
+    """The newest results row of this model, or None."""
+    import json
+    p = path or results_path()
+    if not p.exists():
+        return None
+    rows = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if r.get("model") == model:
+            rows.append(r)
+    return rows[-1] if rows else None
 
 
 def report(row: dict) -> str:
     """A few lines for the screen and EVALS."""
     s = row["summary"]
-    parts = [f"{k} {s[k][0]}/{s[k][1]}" for k in ("python", "sql", "held_out") if s[k][1]]
+    parts = [f"{k} {s[k][0]}/{s[k][1]}" + (f" (±{margin(*s[k]):.0f})" if k == "held_out" else "")
+             for k in ("python", "sql", "held_out") if s[k][1]]
     lines = [f"practice: {s['all'][0]}/{s['all'][1]} passed · " + " · ".join(parts)
-             + f" · {row['seconds'] / 60:.0f} min",
-             f"misread (its own tests passed, the hidden ones failed): {s['misread']} · "
-             f"wrote no tests of its own: {s['no_own_tests']}"]
+             + f" · {row['seconds'] / 60:.0f} min · margin ±{margin(*s['all']):.0f} points"]
+    k = int(row.get("repeats", 1) or 1)
+    if k > 1:
+        flaky = s.get("flaky", [])
+        lines.append(f"{k} runs of {s.get('tasks', 0)} tasks: passed every run {s.get('pass_all', 0)}/{s.get('tasks', 0)}"
+                     f" (pass^{k}) · passed only some runs: {len(flaky)}"
+                     + (f" ({', '.join(flaky[:5])}{', …' if len(flaky) > 5 else ''})" if flaky else ""))
+    lines.append(f"misread (its own tests passed, the hidden ones failed): {s['misread']} · "
+                 f"wrote no tests of its own: {s['no_own_tests']}")
     reasons = Counter(_reason(r["detail"]) for r in row["results"] if not r["passed"])
     if reasons:
         lines.append("most common failures: " + "; ".join(f"{why} ×{n}" for why, n in reasons.most_common(3)))

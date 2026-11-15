@@ -1,6 +1,8 @@
 # Status
 
-**Now:** v0.8.4 ready (every must-have of D-077 built: 7-13; two code reviews fixed: E-130, E-131; E-106 closed); v0.8.3 published for friends (`codemitra update` + a daily new-release notice, D-084; issue #11 fixed: installs land in the project's Python, E-128; v0.8.2 fixed issue #10); every pushed fix ships as a release; next: their sessions + the D-082 learn-first plan · **Last updated:** 2026-11-14 · **Repo:** https://github.com/prashanth-ds-ml/codemitra
+**Now (2026-11-15):** v0.8.4 published; v0.8.5 (E-132, issue #12) + threads/coach/practice/live fixes + the six research quick wins (E-133/F-125, `reports/CodeMitra next features research.md`) are committed locally, **not pushed** (waiting for the user's go). Live checks pending: practice `--repeats 3` before/after E-133, and qwen3.5 vs qwen3.5-coderparse (laptop had 5.4 GB free RAM; Kaggle not started; the SearXNG uv fix on Kaggle is also unproven). Next from the research (medium): best-of-N on Kaggle with tests as the judge, 4B→9B on failing tests, verified lessons memory (ReMe rules), the D-082 replay + "same mistake twice". · **Last updated:** 2026-11-15 · **Repo:** https://github.com/prashanth-ds-ml/codemitra
+
+**Before (2026-11-14):** v0.8.4 ready (every must-have of D-077 built: 7-13; two code reviews fixed: E-130, E-131; E-106 closed); v0.8.3 published for friends (`codemitra update` + a daily new-release notice, D-084; issue #11 fixed: installs land in the project's Python, E-128; v0.8.2 fixed issue #10)
 **Plan:** [PLAN.md](PLAN.md) · **Scope:** [SCOPE.md](SCOPE.md) · **Decisions:** [DECISIONS.md](DECISIONS.md) ·
 **Lessons:** [LESSONS.md](LESSONS.md) · **Open errors:** [ERROR_LOG.md](ERROR_LOG.md)
 

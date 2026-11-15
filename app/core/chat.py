@@ -23,7 +23,7 @@ from app.core import harness as H
 from app.core import loop as core_loop
 from app.core import signals as SIG
 from app.core import tools as T
-from app.core.parse import text_tool_calls
+from app.core.parse import for_model, text_tool_calls
 from app.llm import STREAM_STALL_S, is_stalled
 
 CHAT_PROMPT = """You are CodeMitra, a local coding assistant working in the user's project folder.
@@ -234,6 +234,41 @@ def offered_phase(answer: str) -> tuple[str, str] | None:
     if verb in ("look", "read", "check") and not re.search(r"\b(fix|change|edit|add|create|build|write)\b", low):
         return "look_at_code", offer
     return "make_change", offer
+
+
+# E-133: an answer that ends by announcing its own next action ("I'll create `query.sql` with the query now.") with
+# no question to the user: it said it would act, so it must act (the decide call picked no phase)
+_PROMISE = re.compile(r"\b(i'?ll|i will|i'?m going to|i am going to|i'?m now going to|let me|let'?s|let us)\s+(now\s+|"
+                      r"first\s+|then\s+|go ahead and\s+|start (by )?|begin (by )?|quickly\s+)?(create|write|look|"
+                      r"read|check|build|add|edit|update|fix|implement|run|make|draft|scaffold|set up|open|search|save|"
+                      r"test|tackle|code|change|modify|put)\b", re.IGNORECASE)
+PROMISE_NOTE = ("[CodeMitra: you said you would do it (\"{said}\"), but you only wrote text: nothing was done. Do it "
+                "now: choose the phase (make_change to write or change files, look_at_code to read them). Do not "
+                "describe it again.]")
+CHANGE_PROMISE_NOTE = ("[CodeMitra: you said what you will do, but no file has been written or changed yet. Call the "
+                       "tool now (write_file or edit_file), then run the tests.]")
+
+
+def promised(text: str) -> str:
+    """The sentence in the last part of an answer where CodeMitra announces its own next action, or ""; never when
+    the answer ends with a question to the user (that is an offer, and the user answers it)."""
+    tail = _MARKDOWN.sub("", text or "").strip()
+    if not tail or tail.rstrip().endswith("?"):
+        return ""
+    tail = tail[-400:]
+    for sentence in reversed(re.split(r"(?<=[.!:])\s+|\n", tail)):
+        if _PROMISE.search(sentence):
+            return sentence.strip()
+    return ""
+
+
+def promises_action(text: str) -> bool:
+    return bool(promised(text))
+
+
+def asks_only(text: str) -> bool:
+    """The user asked only to be told something ("just tell me", "don't change"), never to act."""
+    return bool(_ASKS_ONLY.search(text or ""))
 
 
 def asks_change(text: str) -> bool:
@@ -1069,6 +1104,16 @@ class ChatSession:
                     res = self._decide(messages, res, len(messages) - 1, asks_search, retry=True)
                 finally:
                     messages[:] = [m for m in messages if m is not note]
+        if not self.phase_request and promises_action(res.text) and not asks_only(self._prev_user_full):
+            # E-133 (practice 2026-11-15, mbpp/68 and spider/network_1/899): the decide call answered "I'll create
+            # query.sql with the query now" in text, picked no phase, and the turn ended with no file written
+            self.rec.write("promise", turn=self.turn_no, step=res.steps, text=(res.text or "")[-300:])
+            note = HumanMessage(content=PROMISE_NOTE.format(said=promised(res.text)[:200]))
+            messages.append(note)
+            try:
+                res = self._decide(messages, res, len(messages) - 1, asks_search, retry=True)
+            finally:
+                messages[:] = [m for m in messages if m is not note]
         if not self.phase_request:
             return res  # talked: one call
         asked = name = self.phase_request["name"]
@@ -1351,6 +1396,7 @@ class ChatSession:
         slow_retried = False
         runaway_retried = False
         empty_nudged = False
+        promise_nudged = False
         for step in range(1, max_steps + 1):
             if self.cancelled:
                 res.stopped, res.stop_reason = True, "cancelled (timed out)"
@@ -1360,7 +1406,7 @@ class ChatSession:
             if last:  # D-068 step 2: no tools on the last step, so the turn ends with an answer
                 messages.append(HumanMessage(content=self.last_step_note))
             try:
-                chunks = (self.llm if last else bound).stream(messages)
+                chunks = (self.llm if last else bound).stream(for_model(messages))
                 streamed = self._stream(chunks if self.thinking else guard_runaway(chunks), step)
             except Runaway as exc:  # E-100: invisible thinking until the cap; stop, nudge, one more try
                 self.rec.write("runaway", turn=self.turn_no, step=step, error=str(exc), retry=not runaway_retried)
@@ -1440,10 +1486,17 @@ class ChatSession:
             res.tokens_out += int(meta.get("output_tokens", 0) or 0)
             res.ctx_used = int(meta.get("input_tokens", 0) or 0) or res.ctx_used
             self._note_speed(getattr(reply, "response_metadata", None) or {})
-            if not reply.tool_calls and streamed.text and not last:
-                calls, parse_error = text_tool_calls(streamed.text, {s["name"] for s in specs})
+            thought = getattr(streamed, "thinking", "") or ""
+            if not reply.tool_calls and (streamed.text or thought) and not last:
+                known = {s["name"] for s in specs}
+                calls, parse_error = text_tool_calls(streamed.text, known) if streamed.text else ([], "")
+                where = "text"
+                if not calls and not parse_error and thought and (
+                        not (streamed.text or "").strip() or promises_action(streamed.text)):
+                    calls, _ = text_tool_calls(thought, known)  # E-133: the call was written in the thinking only
+                    where = "thinking"
                 if calls or parse_error:
-                    self.rec.write("text_tool_calls", turn=self.turn_no, calls=calls, error=parse_error)
+                    self.rec.write("text_tool_calls", turn=self.turn_no, calls=calls, error=parse_error, where=where)
                 if calls:  # the model wrote the call as text: run it as a real call
                     reply = AIMessage(content=reply.content, tool_calls=calls,
                                       usage_metadata=getattr(reply, "usage_metadata", None))
@@ -1460,6 +1513,14 @@ class ChatSession:
                 empty_nudged = True  # an empty answer is never accepted (non-negotiable): ask once for one
                 self.rec.write("empty_answer", turn=self.turn_no, step=step)
                 messages.append(HumanMessage(content=EMPTY_ANSWER_NOTE))
+                continue
+            if (not reply.tool_calls and not promise_nudged and not self.deciding and not last and step < max_steps
+                    and self.last_phase == "make_change" and not res.journal and promises_action(streamed.text)):
+                # E-133: in the change phase it said "I'll create query.sql now" and stopped with nothing written
+                promise_nudged = True
+                self.rec.write("promise", turn=self.turn_no, step=step, text=(streamed.text or "")[-300:])
+                messages.append(AIMessage(content=reply.content or streamed.text or ""))
+                messages.append(HumanMessage(content=CHANGE_PROMISE_NOTE))
                 continue
             messages.append(reply)
             if not reply.tool_calls:
@@ -1578,7 +1639,7 @@ class ChatSession:
         messages.append(HumanMessage(content=(
             f"[CodeMitra stopped the tools: {reason}.] Tell the user in a few short lines what you did, "
             "what failed and what is left. Do not call tools.")))
-        streamed = self._stream(self.llm.stream(messages), res.steps + 1)
+        streamed = self._stream(self.llm.stream(for_model(messages)), res.steps + 1)
         reply = streamed.message if streamed.message is not None else AIMessage(content=streamed.text)
         self.rec.trace(messages, reply, tools=[], model=str(getattr(self.llm, "model", "") or ""),
                        num_ctx=self.num_ctx, seconds=getattr(streamed, "seconds", None),

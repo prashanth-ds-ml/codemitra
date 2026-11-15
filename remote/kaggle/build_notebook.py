@@ -94,6 +94,15 @@ else:
 PULL = """# Download the model (a few minutes) and load it once at the full context, so CodeMitra's first call is fast
 say("pulling", model=MODEL)
 !ollama pull {MODEL}
+# Quick win 3 (ollama#14493): the same weights with the qwen3-coder renderer and parser, as MODEL-coderparse, to compare
+mf = subprocess.run(["ollama", "show", "--modelfile", MODEL], capture_output=True, text=True, timeout=120).stdout
+if "RENDERER qwen3.5" in mf:
+    with open("/kaggle/working/Modelfile.coderparse", "w") as f:
+        f.write(mf.replace("RENDERER qwen3.5", "RENDERER qwen3-coder").replace("PARSER qwen3.5", "PARSER qwen3-coder"))
+    name, _, tag = MODEL.partition(":")
+    made = subprocess.run(["ollama", "create", f"{name}-coderparse:{tag or 'latest'}", "-f",
+                           "/kaggle/working/Modelfile.coderparse"], capture_output=True, text=True, timeout=300)
+    print("coderparse variant:", "made" if made.returncode == 0 else (made.stderr or made.stdout)[-200:])
 say("loading", model=MODEL, context=CONTEXT)
 t0 = time.time()
 api("/api/generate", {"model": MODEL, "prompt": "Say ok.", "stream": False,
