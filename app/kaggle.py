@@ -295,7 +295,7 @@ def start(model: str, ctx: int = 262_144, *, idle_min: int = 30, max_hours: floa
         status, _ = run_status(api, ref)
         if status in ("QUEUED", "RUNNING"):
             r = remote.active()
-            if r and r.get("name") == "kaggle":
+            if _connected(r, state):
                 echo("☁ already running: CodeMitra uses it (`codemitra kaggle stop` ends it).")
                 return r
             echo(f"⏳ a run is already {status.lower()}: following it")
@@ -321,12 +321,25 @@ def start(model: str, ctx: int = 262_144, *, idle_min: int = 30, max_hours: floa
     return _follow(api, ref, state, ctx, wait_min, echo, sleep)
 
 
-def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep) -> dict:
+QUEUE_MAX_MIN = 120  # E-135: Kaggle may hold a GPU run in its queue for over an hour; no hours are used meanwhile
+
+
+def _connected(r: dict | None, state: dict) -> bool:
+    """CodeMitra points at THIS run (E-135: an address left from an earlier run is not this one)."""
+    public = (state.get("public") or "").rstrip("/")
+    return bool(r and r.get("name") == "kaggle" and public and str(r.get("url", "")).startswith(public))
+
+
+def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep, queue_min: float = QUEUE_MAX_MIN,
+            clock=time.time) -> dict:
+    """Follow the run: up to queue_min in Kaggle's queue, then wait_min from when it runs (E-135: the queue time
+    used to count against the 20 minutes, so a long queue gave up and the server that came up later sat unused)."""
     from app import remote
-    deadline = time.time() + wait_min * 60
+    deadline = clock() + queue_min * 60
+    running = False
     seen: set[str] = set()
     search_ok = False  # must-have 10: set by the notebook's "search" line
-    while time.time() < deadline:
+    while clock() < deadline:
         status, failure = run_status(api, ref)
         if status in ("ERROR", "CANCEL_REQUESTED", "CANCEL_ACKNOWLEDGED", "COMPLETE"):
             raise KaggleError(f"The Kaggle run ended ({status.lower()}{': ' + failure if failure else ''}). "
@@ -337,11 +350,14 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep) 
                 seen.add("queued")
             sleep(10)
             continue
+        if not running:
+            running = True
+            deadline = clock() + wait_min * 60
         q: Queue = Queue()
         stop = threading.Event()
         threading.Thread(target=_log_lines, args=(api, ref, q, stop), daemon=True).start()
         buffer = ""
-        while time.time() < deadline:
+        while clock() < deadline:
             try:
                 chunk = q.get(timeout=15)
             except Empty:
@@ -384,8 +400,11 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep) 
                     echo(f"  · {STAGE_TEXT[stage]}")
         stop.set()
         sleep(5)
-    raise KaggleError(f"Not ready after {wait_min:.0f} minutes. `codemitra kaggle status` shows it; the log: "
-                      f"{state.get('url')}")
+    if not running:
+        raise KaggleError(f"Still in Kaggle's queue after {queue_min:.0f} minutes (no GPU hours used). "
+                          "`codemitra kaggle start` follows it again; `codemitra kaggle stop` cancels it.")
+    raise KaggleError(f"Not ready {wait_min:.0f} minutes after it started running. `codemitra kaggle start` follows "
+                      f"it again; the log: {state.get('url')}")
 
 
 def stop(*, echo=print, api=None, sleep=time.sleep, wait_s: float = 90) -> None:
@@ -442,6 +461,10 @@ def status(*, echo=print, api=None) -> None:
             run, failure = run_status(api, state["ref"])
             echo(f"Kaggle run: {run.lower()}{' · ' + failure if failure else ''} · {state.get('model', '?')} at "
                  f"{int(state.get('ctx') or 0) // 1024}K · {state.get('url', '')}")
+            if run in ("QUEUED", "RUNNING") and not _connected(r, state):
+                # E-135: a run nobody is following never gets used; say how to connect to it
+                echo("  not connected to this run yet: `codemitra kaggle start` follows it and switches CodeMitra "
+                     "to it when it is ready")
         else:
             echo("Kaggle run: none started from CodeMitra yet (`codemitra kaggle start`)")
         echo(quota_line(quota(api)))

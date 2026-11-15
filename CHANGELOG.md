@@ -3,6 +3,8 @@
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
 ## [Unreleased]
+- **A long Kaggle queue no longer wastes a run (E-135):** `kaggle start` waits up to 2 hours in Kaggle's queue
+  (no hours used) and then 20 minutes from when it runs; `kaggle status` says how to connect to a run nobody follows.
 - **Add skills and MCP servers (E-134):** `codemitra skills add <folder or git URL>` / `remove` / `import claude`;
   `codemitra mcp add <name> -- <command>` or `--url <address>` / `remove` / `import cursor|vscode`. Skills in
   `~/.codemitra/skills` work in every project. A new server starts once to show it works, and every tool of it asks
