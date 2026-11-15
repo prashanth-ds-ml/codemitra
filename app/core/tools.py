@@ -45,6 +45,7 @@ class Workspace:
     # must-have 12: (absolute path) -> bool, asked before reading anything outside the project; None = never
     before_read_outside: object = None
     allowed_outside: set = field(default_factory=set)  # folders the user allowed this session (asked once each)
+    python: str = ""  # E-132: the Python its tests use when the caller knows it (the benchmark's own)
 
     def __post_init__(self):
         self.root = Path(self.root).resolve()
@@ -688,7 +689,7 @@ def run_tests(ws: Workspace, command: str | None = None, extra: list[str] | None
             raise ToolError(f"The test command '{cmd}' is not pytest: run_tests cannot select a file or keyword.")
         args += extra
     if args and args[0] in ("python", "python3", "py"):
-        args[0] = project_python(cwd if any((cwd / v).is_dir() for v in (".venv", "venv", "env")) else ws.root)
+        args[0] = ws.python or project_python(cwd if any((cwd / v).is_dir() for v in (".venv", "venv", "env")) else ws.root)
     t0 = time.monotonic()
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"}
     try:

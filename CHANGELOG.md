@@ -2,6 +2,12 @@
 
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
+## [0.8.5] - 2026-11-15 · codemitra improve works on a friend's machine
+- **`codemitra improve` (E-132, issue #12):** errors that come from your machine (a refused program, a missing
+  package or interpreter, no network) are named as such and never get a rule like "retry 3 times"; the
+  benchmark has its own Python with what it needs (made once with uv, about a minute), so grading works on any
+  machine.
+
 ## [0.8.4] - 2026-11-15 · every must-have built (D-077)
 - **Review fixes (E-130):** labels per session; scoring never reads outside its folder; `package_info` never
   runs the project's code; a yes to read outside covers one folder, not the folders below it.

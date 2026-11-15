@@ -18,6 +18,8 @@ SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", "worktrees", "si
 PATTERNS = {
     "repeated_failing_command": "The same shell command failed 3+ times in one turn or task.",
     "tool_error": "A tool call failed (grouped by tool and error).",
+    "environment": "A tool failed because of the machine, not the model (a refused program, a missing package, pip "
+                   "or interpreter, no network). A settings change cannot fix it: it needs setup or a code fix.",
     "refused_repeat": "The guard refused an identical call.",
     "guard_stop": "The guard stopped a turn (repeats or failures in a row).",
     "step_limit": "A turn or task hit its step limit without finishing.",
@@ -85,6 +87,17 @@ def find_run_files(roots: list[Path], max_depth: int = 7) -> list[Path]:
             if ".codemitra" in parts and "runs" in parts:
                 out |= {(Path(dirpath) / f).resolve() for f in filenames if f.endswith(".jsonl")}
     return sorted(out)
+
+
+# E-132 (issue #12): these come from the machine; "retry 3 times" was proposed for a missing interpreter
+_ENV_ERROR = re.compile(r"denied by policy|not in the allowed commands|No module named|ModuleNotFoundError|"
+                        r"Executable not found|is not recognized as|command not found|not on PATH|Offline|"
+                        r"getaddrinfo|Could not resolve host|No such file or directory: '?(python|pip|node|npm)", re.I)
+NOT_FIXABLE = ("environment",)  # never the target of a proposal
+
+
+def is_environment_error(text: str) -> bool:
+    return bool(_ENV_ERROR.search(str(text or "")))
 
 
 def _norm_error(text: str) -> str:
@@ -169,7 +182,8 @@ def analyze(files: list[Path], harness_version: int | None = None) -> Report:
                 elif not ok:
                     is_test = name == "run_tests" or (name == "run_command" and "pytest" in cmd)
                     if not is_test:  # failing tests are normal while building
-                        rep.pattern("tool_error").add(f"{name}: {_norm_error(out)}")
+                        kind_ = "environment" if is_environment_error(out) else "tool_error"
+                        rep.pattern(kind_).add(f"{name}: {_norm_error(out)}")
                     if name == "run_command":
                         u["cmd_fail"][json.dumps(r.get("args", {}), sort_keys=True)] += 1
             elif kind == "tests":

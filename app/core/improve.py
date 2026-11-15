@@ -39,11 +39,49 @@ stop the top problem. Answer with JSON only, one of:
 {"kind": "rule", "text": "<one short instruction for the assistant, under 200 characters>", "why": "<one line>"}
 {"kind": "tool", "name": "<tool name>", "text": "<new description of that tool>", "why": "<one line>"}
 {"kind": "limit", "name": "<limit name>", "value": <integer>, "why": "<one line>"}
-A rule must be general (no file names from the examples) and must not repeat an existing rule."""
+A rule must be general (no file names from the examples) and must not repeat an existing rule.
+Read the examples for the cause: retrying never fixes a refused command or a missing package or program."""
 
 
 class BenchError(RuntimeError):
     """The benchmark itself broke (not the model): the A/B result would mean nothing."""
+
+
+BENCH_PACKAGES = ("pytest", "fastapi", "httpx")  # what bench/base imports (pydantic comes with fastapi)
+_BENCH_CHECK = "import pytest, fastapi, httpx, fastapi.testclient"
+
+
+def bench_python(say=print, run=None) -> str:
+    """A Python that has the benchmark's packages (E-132, issue #12: grading ran in CodeMitra's own Python, which has
+    no fastapi, so every grade broke). The first that works: CodeMitra's own, then ~/.codemitra/bench-env (made once
+    with uv). Raises BenchError, saying what to do, when none can be made."""
+    import subprocess
+    run = run or (lambda args, timeout: subprocess.run(args, capture_output=True, text=True, timeout=timeout))
+    venv = H.home() / "bench-env"
+    own = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+
+    def works(py) -> bool:
+        try:
+            return run([str(py), "-c", _BENCH_CHECK], 60).returncode == 0
+        except Exception:
+            return False
+    for py in (sys.executable, own):
+        if Path(py).exists() and works(py):
+            return str(py)
+    uv = shutil.which("uv")
+    if not uv:
+        raise BenchError("the benchmark needs a Python with " + ", ".join(BENCH_PACKAGES) + " and uv is not "
+                         "installed to make one: run the setup script again (it installs uv)")
+    say("Preparing the benchmark's own Python (once, about a minute): " + ", ".join(BENCH_PACKAGES))
+    try:
+        run([uv, "venv", "--python", "3.12", str(venv)], 300)
+        run([uv, "pip", "install", "--python", str(own), *BENCH_PACKAGES], 600)
+    except Exception as exc:
+        raise BenchError(f"could not make the benchmark's Python: {exc}") from exc
+    if not works(own):
+        raise BenchError("the benchmark's Python was made but cannot import " + ", ".join(BENCH_PACKAGES)
+                         + f" (offline?): {own}")
+    return str(own)
 
 
 @dataclass
@@ -125,10 +163,15 @@ def parse_change(text: str, h: H.Harness, tool_names: set[str]) -> tuple[Change 
     return None, f"unknown kind {kind!r}"
 
 
+def fixable(rep: A.Report, n: int = 5) -> list:
+    """The top patterns a settings change can fix (E-132: never the machine's own errors)."""
+    return [p for p in rep.top(n + len(A.NOT_FIXABLE)) if p.name not in A.NOT_FIXABLE][:n]
+
+
 def propose(rep: A.Report, h: H.Harness, llm, tool_names: set[str], tries: int = 2) -> tuple[Change | None, str]:
     patterns = "\n".join(
         f"- {p.count}x {p.name}: {A.PATTERNS.get(p.name, '')}\n" + "".join(f"    e.g. {e}\n" for e in p.examples[:3])
-        for p in rep.top(5))
+        for p in fixable(rep))
     settings = H.to_toml(h)
     user = (f"Problems found in {rep.units} recorded turns/tasks (most frequent first):\n{patterns}\n"
             f"Current settings:\n{settings}\nTools: {', '.join(sorted(tool_names))}\n"
@@ -184,18 +227,19 @@ def evaluate(h: H.Harness, llm, *, tasks=None, bench=None, num_ctx: int = 131072
     bench = bench or load_bench()
     tasks = tasks if tasks is not None else [t for t in bench.load_tasks() if t.split == "tune"]
     score = Score(total=len(tasks))
+    py = bench_python() if tasks else None  # E-132: the model's test runs and the grading use the same Python
     for task in tasks:
         tmp = Path(tempfile.mkdtemp(prefix=f"codemitra-improve-{task.id}-"))
         try:
             ws_dir = tmp / "ws"
             bench.prepare(task, ws_dir)
-            ws = T.Workspace(ws_dir, test_command="python -m pytest -q")
+            ws = T.Workspace(ws_dir, test_command="python -m pytest -q", python=py)
             rec = (record_root / f"{task.id}.jsonl") if record_root else None
             res = solve(task.prompt.strip(), ws, llm, harness=h, num_ctx=num_ctx, max_steps=max_steps,
                         record_path=rec)
             if res.status == "error":  # the model call failed (Ollama down, timeout): not the harness's fault
                 raise BenchError(f"{task.id}: {res.summary}")
-            g = bench.grade(task, ws_dir, python=T.project_python(ws_dir))  # the Python the tests ran with
+            g = bench.grade(task, ws_dir, python=py)  # the same Python the model's tests ran with (E-132)
             if getattr(g, "infra_error", None):
                 raise BenchError(f"grading {task.id} broke ({g.infra_error}): {g.output_tail[-300:]}")
             score.passed += int(g.passed)
@@ -253,13 +297,18 @@ def improve(rep: A.Report, *, proposer, builder, builder_name: str = "", propose
     """One round: propose -> A/B on the tune half -> keep or drop. Returns the logged entry."""
     current = H.load()
     tool_names = {s["name"] for s in T.TOOL_SPECS}
+    top = fixable(rep, 1)
     entry = {"date": time.strftime("%Y-%m-%d %H:%M"), "harness_version": current.version, "builder": builder_name,
-             "proposer": proposer_name, "top_pattern": rep.top(1)[0].name if rep.patterns else ""}
-    if not rep.patterns:
-        entry.update(result="skipped", reason="no problems in the run records")
-        say("No problems in the run records: nothing to improve yet.")
+             "proposer": proposer_name, "top_pattern": top[0].name if top else ""}
+    env = rep.patterns.get("environment") if isinstance(rep.patterns, dict) else None
+    if env:  # E-132: said, never "fixed" by a rule
+        say(f"Machine problems seen {env.count}x (a refused program, a missing package or interpreter); a rule cannot "
+            f"fix these, they need setup or a code fix: " + "; ".join(env.examples[:3]))
+    if not top:
+        entry.update(result="skipped", reason="no problems a settings change can fix in the run records")
+        say("No problems a settings change can fix in the run records: nothing to improve yet.")
         return entry
-    say(f"Top problem: {entry['top_pattern']} ({rep.top(1)[0].count}x). Asking {proposer_name or 'the proposer'}...")
+    say(f"Top problem: {entry['top_pattern']} ({top[0].count}x). Asking {proposer_name or 'the proposer'}...")
     try:
         change, why = propose(rep, current, proposer, tool_names)
     finally:
