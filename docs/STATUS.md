@@ -1,12 +1,12 @@
 # Status
 
-**Now:** v0.8.3 published for friends (`codemitra update` + a daily new-release notice, D-084; issue #11 fixed: installs land in the project's Python, E-128; v0.8.2 fixed issue #10); every pushed fix ships as a release; next: their sessions + the D-082 learn-first plan · **Last updated:** 2026-11-14 · **Repo:** https://github.com/prashanth-ds-ml/codemitra
+**Now:** v0.8.4 ready (must-haves 7 fair gate + 8 threads append; not pushed yet); v0.8.3 published for friends (`codemitra update` + a daily new-release notice, D-084; issue #11 fixed: installs land in the project's Python, E-128; v0.8.2 fixed issue #10); every pushed fix ships as a release; next: their sessions + the D-082 learn-first plan · **Last updated:** 2026-11-14 · **Repo:** https://github.com/prashanth-ds-ml/codemitra
 **Plan:** [PLAN.md](PLAN.md) · **Scope:** [SCOPE.md](SCOPE.md) · **Decisions:** [DECISIONS.md](DECISIONS.md) ·
 **Lessons:** [LESSONS.md](LESSONS.md) · **Open errors:** [ERROR_LOG.md](ERROR_LOG.md)
 
 ## Next session starts here (handoff 2026-11-14)
 **Where it stands:** v0.8.3 is public (pre-release; D-084 `codemitra update`; E-127 / issue #10: setup on a fresh Windows machine now finds the Ollama winget just installed) at github.com/prashanth-ds-ml/codemitra, CI green on Windows +
-Linux, 1,115 tests. Friends clone and run one command (`setup.ps1` / `setup.sh` → `codemitra setup`). The user's
+Linux, 1,125 tests. Friends clone and run one command (`setup.ps1` / `setup.sh` → `codemitra setup`). The user's
 installed `codemitra` runs from ~/projects/codemitra-stable (0.8.1). Owner and push account: prashanth-ds-ml (run
 `gh` for this project with `GH_TOKEN=$(gh auth token -u prashanth-ds-ml)`; the global active account may differ).
 

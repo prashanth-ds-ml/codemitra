@@ -510,7 +510,7 @@ RATE_HINT_EVERY = 5           # D-079: the 'worked? + / -' hint at most once in 
 SESSION_RATING_MIN_TURNS = 3  # D-079: the 1-5 question at exit only after a real session
 
 
-def _score_model(model: str, remote: bool, ctx: int, arch: str):
+def _score_model(model: str, remote: bool, ctx: int, arch: str, temperature: float | None = None):
     """The model a score run uses -> (llm, model name, num_ctx, backend). Shared by `codemitra score` and
     `codemitra improve --chat`, so the judge runs exactly as a score does."""
     from app.core import roles as roles_mod
@@ -537,7 +537,9 @@ def _score_model(model: str, remote: bool, ctx: int, arch: str):
             raise typer.Exit(1)
         base_url, num_ctx, backend = info["url"], int(info.get("num_ctx") or num_ctx), "remote"
     think = False if model_supports_thinking(model_name) else None
-    return get_local_llm(model_name, base_url=base_url, num_ctx=num_ctx, reasoning=think), model_name, num_ctx, backend
+    kw = {} if temperature is None else {"temperature": temperature}  # the improve judge: 0 (must-have 7)
+    llm = get_local_llm(model_name, base_url=base_url, num_ctx=num_ctx, reasoning=think, **kw)
+    return llm, model_name, num_ctx, backend
 
 
 def cmd_score(
@@ -662,7 +664,7 @@ def cmd_improve(
     chat: bool = typer.Option(False, "--chat", help="Learn a conversation rule from failed score cases and your "
                               "/bad and rephrase signals; `codemitra score` (behaviour, writing, explain, ideas) decides."),
     rounds: int = typer.Option(1, "--rounds", help="With --chat: rounds in a row (~20 min each on the laptop)."),
-    min_gain: int = typer.Option(0, "--min-gain", help="With --chat: cases the rule must add (0 = the default, 2)."),
+    min_gain: int = typer.Option(0, "--min-gain", help="With --chat: targeted cases the rule must fix reliably (0 = the default, 1)."),
     arch: str = typer.Option("phased", "--arch", help="With --chat: the architecture scored (as `codemitra score`)."),
     remote: bool = typer.Option(False, "--remote", help="With --chat: run on the remote GPU in use (Kaggle)."),
     ctx: int = typer.Option(0, "--ctx", help="With --chat: context size (0 = your setting)."),
@@ -731,12 +733,13 @@ def _improve_chat(model: str, arch: str, remote: bool, ctx: int, rounds: int, mi
     from app.core import score as S
     from app.core.chat import CHAT_PROMPT, ONE_PROMPT, PHASED_PROMPT
 
-    llm, model_name, num_ctx, backend = _score_model(model, remote, ctx, arch)
+    llm, model_name, num_ctx, backend = _score_model(model, remote, ctx, arch)  # the proposer
+    judge = _score_model(model, remote, ctx, arch, temperature=IC.JUDGE_TEMPERATURE)[0]
     console.print(Text(f"  improve --chat · {model_name} · {backend} · {num_ctx // 1024}K · {arch} · "
                        f"{rounds} round(s)", style="m.tool"))
 
     def make_runner(h, records):
-        return S.Runner(llm=llm, harness=h, num_ctx=num_ctx, backend=backend, records=records, arch=arch)
+        return S.Runner(llm=judge, harness=h, num_ctx=num_ctx, backend=backend, records=records, arch=arch)
 
     def instructions(h):
         return H.apply_prompt({"one": ONE_PROMPT, "phased": PHASED_PROMPT}.get(arch, CHAT_PROMPT), h)

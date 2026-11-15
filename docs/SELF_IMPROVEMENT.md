@@ -250,6 +250,8 @@ works. With guidance only, every kept change is CodeMitra's own, and the records
 
 **What I would build, in order (each with tests, then a live round):**
 1. The fair test (temperature 0, targeted + 3-run regression check). The 3 rules dropped so far fell to noise (§12).
+   **Built 2026-11-15** (must-have 7, `improve_chat.decide`): the held-out set is your kept /bad cases ("real"); the
+   replay cases of step 2 join it when they exist. A live round waits for free RAM or Kaggle.
 2. Replay cases from real 👎 turns (yours + shared), half held out.
 3. The "same mistake twice" number and the stuck trigger, on the dashboard.
 4. `codemitra coach` becomes the guide: runs only when stuck (or when you ask), writes guidance, never rules.

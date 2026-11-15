@@ -56,33 +56,63 @@ def _slug(text: str) -> str:
     return s[:48] or "thread"
 
 
+HISTORY = "## Earlier"
+_HIST_RE = re.compile(r"^- (\S+ \S+) · said: (.*?) · decided: (.*?) · open: (.*)$", re.M)
+
+
+def _read(f: Path) -> dict | None:
+    try:
+        text = f.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    meta = dict(re.findall(r"^(title|project|updated): (.*)$", text, re.M))
+    body = dict(re.findall(r"^(Said|Decided|Open): (.*)$", text, re.M))
+    history = [{"updated": u, "said": s, "decided": d, "open": o} for u, s, d, o in _HIST_RE.findall(text)]
+    return {"slug": f.stem, "title": meta.get("title", f.stem), "project": meta.get("project", "-"),
+            "updated": meta.get("updated", ""), "said": body.get("Said", ""),
+            "decided": body.get("Decided", "-"), "open": body.get("Open", "-"), "history": history}
+
+
 def load(root: Path | None = None) -> list[dict]:
-    """Every thread: {slug, title, project, updated, said, decided, open}, newest first."""
+    """Every thread: {slug, title, project, updated, said, decided, open, history}, newest first. `history` holds
+    every earlier version of the thread, oldest first (must-have 12: nothing is lost)."""
     root = root or threads_dir()
-    out = []
-    for f in root.glob("*.md"):
-        try:
-            text = f.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        meta = dict(re.findall(r"^(title|project|updated): (.*)$", text, re.M))
-        body = dict(re.findall(r"^(Said|Decided|Open): (.*)$", text, re.M))
-        out.append({"slug": f.stem, "title": meta.get("title", f.stem), "project": meta.get("project", "-"),
-                    "updated": meta.get("updated", ""), "said": body.get("Said", ""),
-                    "decided": body.get("Decided", "-"), "open": body.get("Open", "-")})
+    out = [t for t in (_read(f) for f in root.glob("*.md")) if t]
     return sorted(out, key=lambda t: t["updated"], reverse=True)
 
 
+def _blank(text) -> bool:
+    return _one_line(text) in ("", "-")
+
+
 def save(thread: dict, root: Path | None = None) -> Path:
+    """Write a thread. Continuing one adds, never overwrites (must-have 8): the previous Said / Decided / Open move
+    into its history, a decision stays until a new one replaces it, and the title and project stay as first set."""
     root = root or threads_dir()
     root.mkdir(parents=True, exist_ok=True)
     slug = _slug(thread.get("slug") or thread.get("title", ""))
     f = root / f"{slug}.md"
-    f.write_text(f"---\ntitle: {str(thread.get('title') or slug).strip()}\n"
-                 f"project: {str(thread.get('project') or '-').strip()}\n"
-                 f"updated: {time.strftime('%Y-%m-%d %H:%M')}\n---\n"
-                 f"Said: {_one_line(thread.get('said'))}\nDecided: {_one_line(thread.get('decided')) or '-'}\n"
-                 f"Open: {_one_line(thread.get('open')) or '-'}\n", encoding="utf-8")
+    old = _read(f) if f.exists() else None
+    history = list(old["history"]) if old else []
+    if old and not (_blank(old["said"]) and _blank(old["decided"]) and _blank(old["open"])):
+        history.append({k: old[k] for k in ("updated", "said", "decided", "open")})
+    title = (old or {}).get("title") or str(thread.get("title") or slug).strip()
+    project = str(thread.get("project") or "-").strip()
+    if old and project == "-":
+        project = old["project"]
+    decided = _one_line(thread.get("decided"))
+    if _blank(decided) and old and not _blank(old["decided"]):
+        decided = old["decided"]
+    text = (f"---\ntitle: {title}\nproject: {project}\nupdated: {time.strftime('%Y-%m-%d %H:%M')}\n---\n"
+            f"Said: {_one_line(thread.get('said'))}\nDecided: {decided or '-'}\n"
+            f"Open: {_one_line(thread.get('open')) or '-'}\n")
+    if history:
+        text += f"\n{HISTORY}\n" + "".join(
+            f"- {h['updated'] or '-'} · said: {_one_line(h['said'])} · decided: {_one_line(h['decided']) or '-'}"
+            f" · open: {_one_line(h['open']) or '-'}\n" for h in history)
+    tmp = f.with_suffix(".tmp")  # written whole, then swapped in: a crash never leaves half a thread
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(f)
     return f
 
 
@@ -113,8 +143,14 @@ def relevant_text(message: str, root: Path | None = None, max_chars: int = RELEV
             scored.append((hits + 2 * len(words & title_w), t))
     out, used = [], 0
     for _, t in sorted(scored, key=lambda x: -x[0]):
+        earlier = []  # decisions from earlier sessions of this thread, newest first, each once
+        for h in reversed(t.get("history", [])):
+            d = h["decided"]
+            if not _blank(d) and d != t["decided"] and d not in earlier:
+                earlier.append(d)
         block = (f"## Thread: {t['title']} ({t['project']}, {t['updated'][:10]})\nSaid: {t['said']}\n"
-                 f"Decided: {t['decided']}\nOpen: {t['open']}")
+                 f"Decided: {t['decided']}\nOpen: {t['open']}"
+                 + (f"\nDecided earlier: {' | '.join(e[:200] for e in earlier[:3])}" if earlier else ""))
         if used + len(block) > max_chars:
             break
         out.append(block)

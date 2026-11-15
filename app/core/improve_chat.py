@@ -4,10 +4,12 @@ what went wrong, and keep it only if `codemitra score` says so.
     evidence -> the failed cases of the last score on this model and architecture, and your signals in the run
                 records (/bad with its note, rephrase, interrupt, undo), each with what you said and what CodeMitra said
     propose  -> the chat model proposes ONE general rule (JSON, read by improve.parse_change; rules only)
-    judge    -> the model categories of the quick score (behaviour, writing, explain, ideas), once with the current
-                harness and once with the candidate: same model, same machine, same context
-    decide   -> keep only if the candidate passes at least `min_gain` more cases and no category drops; a kept rule
-                becomes the next harness version (`codemitra harness revert <v>` undoes it)
+    judge    -> the model categories of the quick score (behaviour, writing, explain, ideas) plus your held-out
+                /bad cases ("real"), once with the current harness and once with the candidate: same model, same
+                machine, same context, temperature 0; the cases whose result changed run REPEATS times on both
+    decide   -> the fair gate (must-have 7): keep only if a case the rule was proposed for now passes in most runs and
+                nothing that passed fails in every run (held-out cases included); a kept rule becomes the next
+                harness version (`codemitra harness revert <v>` undoes it)
 
 Every attempt is logged in ~/.codemitra/harness/attempts.jsonl (kind "chat"); the judge's score rows go to that round's
 folder, not results/scores.jsonl. Local models only (D-025); nothing from Claude goes into the harness (D-022).
@@ -27,7 +29,10 @@ from app.core import improve as I
 from app.core import score as S
 
 JUDGE_CATEGORIES = ("behaviour", "writing", "explain", "ideas")
-MIN_GAIN = 2            # one run per arm is noisy (A/B 2026-11-11: the same setup moved by 1-3 cases)
+HELD_OUT = ("real",)    # your /bad turns (D-078 step 6): judged, never evidence, so a rule is never fitted to them
+MIN_GAIN = 1            # gains are counted over REPEATS runs now, so one reliable fix is enough (was 2 single runs)
+REPEATS = 3             # runs per arm of every case that changed (must-have 7; one run moved 1-3 cases by noise)
+JUDGE_TEMPERATURE = 0.0  # the judge runs at temperature 0 so both arms see the same model behaviour
 MAX_FAILURES = 12
 MAX_SIGNALS = 12
 EVIDENCE_SIGNALS = ("rephrase", "interrupt", "undo", "unhappy")  # D-079: unhappy = your next message
@@ -198,17 +203,61 @@ def propose_rule(evidence: str, h: H.Harness, llm, instructions: str, tries: int
 
 # ── judge and decide ────────────────────────────────────────────────────────────────────────────────────────────
 
-def decide(base: dict, cand: dict, min_gain: int = MIN_GAIN) -> tuple[bool, str]:
-    """base / cand: score rows' "score" ({category: [passed, total]})."""
-    b, c = sum(p for p, _ in base.values()), sum(p for p, _ in cand.values())
-    n = sum(t for _, t in base.values())
-    dropped = [f"{k} {cand.get(k, [0, t])[0]}/{t} (was {p}/{t})" for k, (p, t) in base.items()
-               if cand.get(k, [0, t])[0] < p]
-    if dropped:
-        return False, f"{c}/{n} (was {b}/{n}) but a category dropped: " + ", ".join(dropped)
-    if c - b < min_gain:
-        return False, f"{c}/{n} passed, needs at least {b + min_gain}/{n} (was {b}/{n})"
-    return True, f"{c}/{n} passed (was {b}/{n})"
+def passes(row: dict) -> dict[str, bool]:
+    """{case id: passed} of a score row's model cases."""
+    return {c["id"]: bool(c["passed"]) for c in row.get("cases", []) if c.get("category") != "sorting"}
+
+
+def changed_cases(base: dict, cand: dict) -> set[str]:
+    """The cases whose result differs between the two first runs: only these are run again (must-have 7)."""
+    b, c = passes(base), passes(cand)
+    return {i for i in b.keys() & c.keys() if b[i] != c[i]}
+
+
+def decide(base_runs: list[dict], cand_runs: list[dict], categories: dict[str, str], targets: set[str],
+           need: int = MIN_GAIN) -> tuple[bool, str, dict]:
+    """The fair gate (must-have 7, D-082 step 1). base_runs / cand_runs: {case id: passed} per run; the first run has
+    every case, the repeats only the cases that changed. Then:
+      - a **gain** passes in most runs with the rule and fails in most without it;
+      - a **loss** passed in most runs without the rule and fails in every run with it (one bad run is noise);
+      - keep only with no loss (held-out cases included) and at least `need` gains in the learn set, among the
+        targeted cases (the failures the rule was proposed from) when there are any.
+    Returns (keep, reason, detail)."""
+    def count(runs, i):
+        xs = [r[i] for r in runs if i in r]
+        return sum(xs), len(xs)
+
+    gains, losses = [], []
+    first_b, first_c = base_runs[0], cand_runs[0]
+    for i in sorted(i for i in first_b.keys() & first_c.keys() if first_b[i] != first_c[i]):
+        (bp, bn), (cp, cn) = count(base_runs, i), count(cand_runs, i)
+        if cp * 2 > cn and bp * 2 < bn:
+            gains.append(i)
+        elif bp * 2 > bn and cp == 0:
+            losses.append(i)
+    held = [i for i in gains if categories.get(i) in HELD_OUT]
+    learn = [i for i in gains if categories.get(i) not in HELD_OUT]
+    hit = [i for i in learn if i in targets] if targets else learn
+    runs = len(base_runs)
+    detail = {"gains": gains, "losses": losses, "held_out_gains": held, "targeted_gains": hit, "runs": runs}
+    if losses:
+        where = ", ".join(f"{i} ({'held out' if categories.get(i) in HELD_OUT else categories.get(i, '?')})"
+                          for i in losses)
+        return False, f"a case that passed now fails in all {runs} runs: {where}", detail
+    if len(hit) < need:
+        what = "of the cases it was proposed for " if targets else ""
+        got = f" (gains elsewhere: {', '.join(learn)})" if learn and targets else ""
+        return False, f"{len(hit)} {what}passed reliably in {runs} runs, needs {need}{got}", detail
+    extra = f"; held out: +{len(held)}" if held else ""
+    return True, f"fixed {', '.join(hit)} in most of {runs} runs, nothing lost{extra}", detail
+
+
+def has_held_out() -> bool:
+    """Are there held-out cases (your /bad turns kept with `codemitra cases review`)?"""
+    try:
+        return bool(S.real_cases())
+    except Exception:
+        return False
 
 
 def _broken(row: dict) -> str:
@@ -390,20 +439,29 @@ def improve_chat(*, proposer, make_runner: Callable[[H.Harness, Path], S.Runner]
     cand_h = change.apply(current)
     cand_run = cand_h.copy()
     cand_run.version = current.version + 1
-    say(f"Score with the current rules ({', '.join(JUDGE_CATEGORIES)}):")
-    base = run_score(JUDGE_CATEGORIES, runner=make_runner(current, runs / "base"), model=model, cwd=cwd,
-                     on_case=line("current "), results=results)
+    cats = JUDGE_CATEGORIES + (HELD_OUT if has_held_out() else ())
+    arms = {"base": make_runner(current, runs / "base"), "candidate": make_runner(cand_run, runs / "candidate")}
+    say(f"Score with the current rules ({', '.join(cats)}):")
+    base = run_score(cats, runner=arms["base"], model=model, cwd=cwd, on_case=line("current "), results=results)
     if _broken(base):
         entry.update(result="bench_error", reason=_broken(base), base=base["score"], records=str(runs))
         I.log_attempt(entry)
         say(f"The model broke on every case, nothing changed: {_broken(base)}")
         return entry
     say("Score with the proposed rule:")
-    cand = run_score(JUDGE_CATEGORIES, runner=make_runner(cand_run, runs / "candidate"), model=model, cwd=cwd,
-                     on_case=line("proposal"), results=results)
-    keep, reason = decide(base["score"], cand["score"], min_gain)
+    cand = run_score(cats, runner=arms["candidate"], model=model, cwd=cwd, on_case=line("proposal"), results=results)
+    base_runs, cand_runs = [passes(base)], [passes(cand)]
+    again = changed_cases(base, cand)
+    for n in range(2, REPEATS + 1 if again else 1):  # must-have 7: the cases that changed, again, on both arms
+        say(f"Run {n} of {REPEATS} of the {len(again)} case(s) that changed:")
+        for arm, out, label in (("base", base_runs, "current "), ("candidate", cand_runs, "proposal")):
+            out.append(passes(run_score(cats, runner=arms[arm], model=model, cwd=cwd, only=again,
+                                        on_case=line(label), results=results)))
+    categories = {c["id"]: c["category"] for c in base.get("cases", [])}
+    targets = {f["id"] for f in failures}
+    keep, reason, detail = decide(base_runs, cand_runs, categories, targets, min_gain)
     entry.update(base=base["score"], candidate=cand["score"], result="kept" if keep else "dropped", reason=reason,
-                 records=str(runs))
+                 gate=detail, records=str(runs))
     if keep:
         H.save(cand_h, f"{change.describe()} ({reason}; codemitra improve --chat)")
         entry["new_version"] = current.version + 1

@@ -143,8 +143,8 @@ brackets are the must-haves in D-077 each item serves. Steps 4-5 above are items
 | 4 | Read before edit; no accidental whole-file overwrite | 4 | done: read-before-edit existed (tools.py); 2026-11-12 write_file refuses to shrink a 20+ line file to under half |
 | 5 | Coding practice set (`codemitra practice`): Python (MBPP+, HumanEval+; LiveCodeBench left out: licence unclear) and SQL (Spider subset on SQLite) first, MongoDB later with our own tasks (user 2026-11-12); hidden tests judge, CodeMitra writes its own tests; split learn / held out | 10 | done 2026-11-12: `codemitra practice` (100 Python + 50 SQL, misread count); first run pending |
 | 6 | Your real failures (/bad) become score cases | 10 | done 2026-11-12: `codemitra cases` + `codemitra cases review`, private held-out "real" category |
-| 7 | Honest keep/drop gate: re-run the cases that changed, no new failures, held-out set | 11 | |
-| 8 | Threads add, never overwrite | 12 | |
+| 7 | Honest keep/drop gate: re-run the cases that changed, no new failures, held-out set | 11 | done 2026-11-15 (built, live round pending: RAM): judge at temperature 0; the cases that changed run 3 times on both arms; keep = a case the rule was proposed for passes in most runs and nothing that passed fails in every run, your held-out /bad cases included (`improve_chat.decide`) |
+| 8 | Threads add, never overwrite | 12 | done 2026-11-15: a continued thread moves its previous Said / Decided / Open into a dated `## Earlier` list in the same file; a decision stays until a new one replaces it; earlier decisions come with the thread; written whole then swapped in |
 | 9 | Better signals: the 4B reads your next message against a checklist; optional per-session rating at exit | 9 | |
 | 10 | General web search: SearXNG on Kaggle (one-cell engine test first) | 7 | |
 | 11 | Knows its tools and limits; installed package docs first | 7 | |

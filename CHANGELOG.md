@@ -2,6 +2,14 @@
 
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
+## [0.8.4] - 2026-11-15 · a fair learning gate, threads that keep everything
+- **A fair keep/drop gate (must-have 7):** `codemitra improve --chat` judges at temperature 0, runs every case whose
+  result changed 3 times on both the current and the proposed rules, and keeps a rule only if a case it was proposed
+  for passes in most runs and nothing that passed fails in every run, your held-out /bad cases included. One lucky or
+  unlucky run no longer decides.
+- **Threads add, never overwrite (must-have 8):** continuing a discussion keeps its earlier versions in the same file
+  (`## Earlier`); a decision stays until a new one replaces it, and earlier decisions come back with the thread.
+
 ## [0.8.3] - 2026-11-14 · codemitra update, installs in the project's Python
 - **Updates reach you (D-084):** when a new release is out, the chat says so in one line at start (it asks GitHub at
   most once a day, 2 seconds at most, silent offline; nothing about you is sent). `codemitra update` pulls it into
