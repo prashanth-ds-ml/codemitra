@@ -24,6 +24,7 @@ from app.core import loop as core_loop
 from app.core import signals as SIG
 from app.core import tools as T
 from app.core.parse import text_tool_calls
+from app.llm import STREAM_STALL_S, is_stalled
 
 CHAT_PROMPT = """You are CodeMitra, a local coding assistant working in the user's project folder.
 
@@ -1369,6 +1370,13 @@ class ChatSession:
                         time.sleep(5)
                         continue
                     raise RemoteGone(str(exc)[:300]) from exc
+                if self.backend_kind != "remote" and is_stalled(exc):  # E-081: no byte for 5 min; never wait forever
+                    self.rec.write("model_error", turn=self.turn_no, step=step, error=str(exc)[:500], stalled=True)
+                    res.stopped = True
+                    res.stop_reason = (f"the model sent nothing for {STREAM_STALL_S // 60} min, so CodeMitra stopped "
+                                       "waiting (Ollama may be stuck or out of memory: `/free`, or restart Ollama, then "
+                                       "send it again)")
+                    return res
                 if is_connection_error(exc) and not conn_retried:  # Ollama restarted (E-047): wait, retry once
                     conn_retried = True
                     self.rec.write("model_error", turn=self.turn_no, step=step, error=str(exc)[:500], retry=True)

@@ -149,7 +149,7 @@ brackets are the must-haves in D-077 each item serves. Steps 4-5 above are items
 | 10 | General web search: SearXNG on Kaggle (one-cell engine test first) | 7 | |
 | 11 | Knows its tools and limits; installed package docs first | 7 | |
 | 12 | Read files outside the project, read-only, asks first | 4 | |
-| 13 | Kaggle crash-safety, stream timeout (E-081), fast offline detection | 2, 3 | |
+| 13 | Kaggle crash-safety, stream timeout (E-081), fast offline detection | 2, 3 | done 2026-11-15: a 524 retries with smaller steps (E-126); every stream has a 300 s stall limit (F-120); no internet here = offline, not "Kaggle ended": the turn runs on the laptop and Kaggle is used again when online |
 
 Later: night runs on the practice set with a morning report; friends' feedback (scrubbed export/import file); Kiwix
 offline docs (refreshed monthly); lessons from verified work; test anchors; tests first; loop detection; veto a rule

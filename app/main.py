@@ -507,6 +507,7 @@ cli.command("report")(cmd_report)
 
 
 RATE_HINT_EVERY = 5           # D-079: the 'worked? + / -' hint at most once in this many turns
+OFFLINE_KAGGLE = "no internet on this machine: Kaggle keeps running and is used again when you are back online"
 SESSION_RATING_MIN_TURNS = 3  # D-079: the 1-5 question at exit only after a real session
 
 
@@ -4072,7 +4073,9 @@ def _chat():
             console.print(Text("  ✗ " + _note, style="m.err"))
         bsession.notes.clear()
         _hstate = health.check().state if (remote_mod.active() or bsession.kind == backend_mod.REMOTE) else "none"
-        if bsession.kind == backend_mod.REMOTE and _hstate != "up":
+        if bsession.kind == backend_mod.REMOTE and _hstate == "offline":  # must-have 13: not "Kaggle ended"
+            _to_laptop(OFFLINE_KAGGLE)
+        elif bsession.kind == backend_mod.REMOTE and _hstate != "up":
             _kaggle_ended("the Kaggle GPU stopped answering (30 min unused, its time limit, or stopped on Kaggle)")
             typed_ahead = user_input
             console.print(Text("  your message was not sent: it is back in the input box (enter sends it on the "
@@ -4166,7 +4169,12 @@ def _chat():
                     console.print(Text("  worked?  + yes  ·  − no   (or just keep typing)", style="m.faint"))
             last_test_summary = turn.last_test_summary or last_test_summary
             if turn.remote_gone:  # D-062 B3: the remote stopped in the middle of the turn
-                _kaggle_ended("the Kaggle GPU stopped answering in the middle of the turn")
+                if health.check().state == "offline":  # must-have 13: the internet went, not Kaggle
+                    _to_laptop(OFFLINE_KAGGLE)
+                    console.print(Text("  the turn stopped when the internet went; send it again to run it here",
+                                       style="m.faint"))
+                else:
+                    _kaggle_ended("the Kaggle GPU stopped answering in the middle of the turn")
                 continue
 
             # ── Auto-compact ──────────────────────────────────────────────────

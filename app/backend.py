@@ -110,9 +110,11 @@ class Health:
     """Checks the remote in a background thread. `probe(url) -> (models, error)`, `quota() -> dict | None`."""
 
     def __init__(self, *, probe=None, quota=None, active=None, interval: float = HEALTH_EVERY_S,
-                 hours_every: float = HOURS_EVERY_S, clock=time.time):
+                 hours_every: float = HOURS_EVERY_S, clock=time.time, online=None):
         from app import remote
+        from app.agents.web import is_online
         self._probe = probe or (lambda url: remote.probe(url, timeout=15))
+        self._online = online or is_online
         self._quota = quota
         self._active = active or remote.active
         self.interval, self.hours_every, self.clock = interval, hours_every, clock
@@ -131,10 +133,13 @@ class Health:
                 return self.s
             self.s.name = str(r.get("name") or "remote")
         _, err = self._probe(r["url"])
+        offline = bool(err) and not self._online()  # must-have 13: this machine is offline, Kaggle may be fine
         now = self.clock()
         with self._lock:
             self.s.checked = now
-            if err:
+            if offline:
+                self.s.state, self.s.error = "offline", "no internet on this machine"
+            elif err:
                 self.s.state, self.s.error = "down", err
             else:
                 self.s.state, self.s.error, self.s.last_ok, self.s.stage = "up", "", now, ""
@@ -182,6 +187,8 @@ def status_text(kind: str, model: str, num_ctx: int, h: HealthState) -> tuple[st
     if kind == REMOTE:
         if h.state == "down":
             return f"☁ {h.name or 'remote'} not answering · {short} {ctx}", "err"
+        if h.state == "offline":
+            return f"☁ {h.name or 'remote'} · offline (no internet here) · {short} {ctx}", "warn"
         hours = ""
         level = "ok"
         if h.hours_left is not None:
@@ -194,6 +201,8 @@ def status_text(kind: str, model: str, num_ctx: int, h: HealthState) -> tuple[st
         extra = f" · ☁ starting: {h.stage}" if h.stage else " · ☁ starting"
     elif h.state == "up":
         extra = f" · ☁ {h.name} ready"
+    elif h.state == "offline":
+        extra = f" · offline: ☁ {h.name} waits"
     return f"💻 laptop · {short} {ctx}{extra}", "info" if extra else "ok"
 
 

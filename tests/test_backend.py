@@ -57,7 +57,7 @@ def _health(up=True, hours=None, active=True):
         return hours
 
     h = B.Health(probe=probe, quota=quota, active=lambda: {"url": "u", "name": "kaggle"} if active else None,
-                 clock=lambda: 1000.0)
+                 clock=lambda: 1000.0, online=lambda: True)
     return h, calls
 
 

@@ -45,10 +45,25 @@ def get_llm(
         kwargs["reasoning"] = reasoning
     if keep_alive:
         kwargs["keep_alive"] = keep_alive
-    client_kwargs = _make_client_kwargs(api_key)
-    if client_kwargs:
-        kwargs["client_kwargs"] = client_kwargs
+    kwargs["client_kwargs"] = {**(_make_client_kwargs(api_key) or {}), "timeout": stream_timeout()}
     return ChatOllama(**kwargs)
+
+
+# E-081 (must-have 13): a model stream with no read timeout waited forever when Ollama or the Kaggle tunnel stalled.
+# The read limit is the longest gap between two pieces of the reply (the first piece included: loading the model and
+# reading a long prompt on the laptop can take minutes), not the length of the whole answer.
+STREAM_STALL_S = 300
+CONNECT_S = 10
+
+
+def stream_timeout():
+    import httpx
+    return httpx.Timeout(STREAM_STALL_S, connect=CONNECT_S)
+
+
+def is_stalled(exc: BaseException) -> bool:
+    """The model sent nothing for STREAM_STALL_S (httpx's read timeout), not a broken connection."""
+    return type(exc).__name__ in ("ReadTimeout", "TimeoutException")
 
 
 # E-099 (2026-11-11): with no output cap a looping small model generated 18,400 tokens for 36 minutes and every

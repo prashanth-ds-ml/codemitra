@@ -23,7 +23,8 @@ class TestGetLocalLlm:
         assert captured["temperature"] == 0.1
         assert captured["num_ctx"] == 32768
         assert captured["base_url"] == "http://localhost:11434"
-        assert "client_kwargs" not in captured
+        assert "headers" not in captured["client_kwargs"]           # no API key: no auth header
+        assert captured["client_kwargs"]["timeout"].read == llm.STREAM_STALL_S  # E-081: always a stall limit
 
     def test_thinking_models_get_reasoning_on_so_thinking_is_not_dropped(self, monkeypatch):
         """E-016: with reasoning unset, langchain-ollama drops a thinking model's reasoning; CodeMitra looked frozen."""

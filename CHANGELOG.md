@@ -2,7 +2,11 @@
 
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
-## [0.8.4] - 2026-11-15 · a fair learning gate, threads that keep everything
+## [0.8.4] - 2026-11-15 · a fair learning gate, threads that keep everything, no endless waits
+- **Never waits forever (E-081, must-have 13):** if the model sends nothing for 5 minutes, CodeMitra stops the
+  turn and says why and what to do (`/free`, or restart Ollama). Before, a stuck Ollama or tunnel hung the chat.
+- **Offline is not "Kaggle ended":** with no internet on your machine, the turn runs on the laptop and Kaggle keeps
+  running; it is used again when you are back online. The status line says offline.
 - **A fair keep/drop gate (must-have 7):** `codemitra improve --chat` judges at temperature 0, runs every case whose
   result changed 3 times on both the current and the proposed rules, and keeps a rule only if a case it was proposed
   for passes in most runs and nothing that passed fails in every run, your held-out /bad cases included. One lucky or
