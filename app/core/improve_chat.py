@@ -159,10 +159,25 @@ def banned_words() -> set[str]:
     return words | {k.lower() for k in case_texts()}
 
 
-def check_rule(text: str, banned: set[str]) -> str:
+def _content_pairs(text: str) -> set[tuple[str, str]]:
+    """Neighbouring content words (small words left out): 'difference between LoRA and QLoRA' -> (lora, qlora)…"""
+    from app.core.threads import _STOP
+    words = [w for w in re.findall(r"[a-z0-9][a-z0-9\-]+", text.lower()) if len(w) > 2 and w not in _STOP]
+    return set(zip(words, words[1:]))
+
+
+def check_rule(text: str, banned: set[str], cases: dict[str, str] | None = None) -> str:
     low = text.lower()
     hit = sorted(w for w in banned if re.search(rf"\b{re.escape(w)}\b", low))
-    return f"the rule names the test set ({', '.join(hit)}): it must be general" if hit else ""
+    if hit:
+        return f"the rule names the test set ({', '.join(hit)}): it must be general"
+    pairs = _content_pairs(text)  # live 2026-11-15: a rule quoted case B6's own question ("LoRA and QLoRA")
+    for cid, asked in (case_texts() if cases is None else cases).items():
+        shared = pairs & _content_pairs(asked)
+        if shared:
+            return (f"the rule quotes a test case ({cid}: '{' '.join(sorted(shared)[0])}'): describe the kind of "
+                    "message, not one example")
+    return ""
 
 
 def tried_rules() -> list[str]:

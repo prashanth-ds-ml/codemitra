@@ -228,3 +228,13 @@ def test_a_queued_coach_rule_counts_any_reliable_fix():
     IC.queue_rules([{"text": "Ask one short question back when the user is deciding.", "why": "1"}])
     entry = _run(Proposer(), Scores(BASE, {**BASE, "ideas": [2, 2]}), _row(BASE, FAILED))
     assert entry["result"] == "kept" and entry["source"] == "coach"
+
+
+def test_a_rule_that_quotes_a_test_case_is_refused():
+    """Live 2026-11-15: the proposer wrote 'questions like "what is the difference between LoRA and QLoRA?"', the
+    exact message of case B6; banned words caught only project names and case ids."""
+    cases = {"B6_general": "what is the difference between LoRA and QLoRA?"}
+    quoted = "When answering questions like 'what is the difference between LoRA and QLoRA?', keep it short."
+    assert "quotes a test case (B6_general" in IC.check_rule(quoted, set(), cases)
+    assert IC.check_rule("When the user asks a general knowledge question, answer in under 150 words.", set(),
+                         cases) == ""

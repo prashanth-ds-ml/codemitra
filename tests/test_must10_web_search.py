@@ -115,3 +115,12 @@ def test_the_notebook_starts_search_in_the_background_and_never_lets_it_stop_the
     assert "format: [html, json]" not in cells[start] and "formats: [html, json]" in nb.SEARX_SETTINGS
     for c in (cells[start], cells[check]):
         compile(c, "cell", "exec")                              # plain Python (no ! lines)
+
+
+def test_searxng_is_installed_with_uv_not_a_plain_venv():
+    """Live on Kaggle 2026-11-15: Kaggle's Python 3.13 cannot make a plain venv (ensurepip failed); uv can."""
+    spec = importlib.util.spec_from_file_location("build_nb10b", KAGGLE_DIR / "build_notebook.py")
+    nb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nb)
+    script = next("".join(c["source"]) for c in nb.build()["cells"] if "SearXNG (metasearch)" in "".join(c["source"]))
+    assert "python -m uv venv" in script and "python -m venv" not in script and "ensurepip" not in script

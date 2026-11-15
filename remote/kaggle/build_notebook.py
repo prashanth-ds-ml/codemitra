@@ -125,9 +125,9 @@ import secrets as _secrets
 SEARX_SCRIPT = """set -e
 cd /kaggle/working
 git clone -q --depth 1 https://github.com/searxng/searxng searxng-src
-python -m venv sxvenv
-sxvenv/bin/pip install -q -U pip setuptools wheel
-sxvenv/bin/pip install -q -r searxng-src/requirements.txt
+python -m pip install -q uv 2>/dev/null || python -m pip install -q --break-system-packages uv
+python -m uv venv -q sxvenv
+python -m uv pip install -q --python sxvenv/bin/python -r searxng-src/requirements.txt
 cd searxng-src
 SEARXNG_SETTINGS_PATH=/kaggle/working/searx/settings.yml exec ../sxvenv/bin/python -m searx.webapp
 """
