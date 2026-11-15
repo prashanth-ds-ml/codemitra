@@ -134,8 +134,9 @@ class ShellResult:
 
     @property
     def still_running(self) -> bool:
-        """Stopped at the timeout with no error in its output: a game, window or server that runs until closed."""
-        if not self.timed_out:
+        """Stopped at the timeout with no error in its output: a game, window or server that runs until closed.
+        Never an install cut off at its limit (E-131: a half-installed project was reported as running)."""
+        if not self.timed_out or is_install(self.command):
             return False
         tail = self.tail.lower()
         return not any(w in tail for w in ("traceback", "error", "exception", "failed"))
@@ -270,6 +271,14 @@ _INTERPRETERS = {"python", "python3", "py", "node", "deno", "bun", "ruby", "perl
 _INLINE_CODE_FLAGS = {"-c", "-e", "--eval", "-p", "--print", "-command", "-encodedcommand", "/c", "/k", "-r"}
 
 
+INSTALL_TIMEOUT_S = 900  # E-131: `pip install torch`, `npm install`, `playwright install chromium` take minutes
+_INSTALL = re.compile(r"\b(pip3?|python3?|py|npm|npx|yarn|pnpm|playwright|uv)\b.*\b(install|ci|sync|add)\b", re.I)
+
+
+def is_install(command: str) -> bool:
+    return bool(_INSTALL.search(command or ""))
+
+
 def runs_inline_code(command: str) -> bool:
     """`python -c "..."`, `node -e ...`, `powershell -Command ...`: the allow-list sees only the program name, so code
     passed inline could do anything (E-003)."""
@@ -280,13 +289,22 @@ def runs_inline_code(command: str) -> bool:
     if not parts:
         return False
     exe = re.sub(r"\.exe$", "", pathlib.Path(parts[0]).name, flags=re.IGNORECASE).lower()
-    return exe in _INTERPRETERS and any(arg.lower() in _INLINE_CODE_FLAGS for arg in parts[1:])
+    if exe not in _INTERPRETERS:
+        return False
+    for arg in parts[1:]:  # E-131: only the interpreter's own options count, not those after `-m pkg` or a script
+        low = arg.lower()
+        if low in _INLINE_CODE_FLAGS:
+            return True
+        if low == "-m" or not low.startswith(("-", "/")):
+            return False
+    return False
 
 
 def unix_to_windows_path(arg: str) -> str:
     """`/c/Users/x` (Git Bash style, which models often write) -> `C:/Users/x` on Windows."""
-    if platform.system() == "Windows" and re.match(r"^/[a-zA-Z](/|$)", arg):
-        return arg[1].upper() + ":" + (arg[2:] or "/")
+    # E-131: only `/c/...`: a bare `/b` or `/s` is a Windows flag (`dir /b`), not drive B
+    if platform.system() == "Windows" and re.match(r"^/[a-zA-Z]/", arg):
+        return arg[1].upper() + ":" + arg[2:]
     return arg
 
 
@@ -361,7 +379,10 @@ def _model_command_args(command: str, cwd: str) -> list[str]:
     args = _split_command(command)
     if not args:
         return args
-    exe = re.sub(r"\.exe$", "", pathlib.Path(args[0]).name.lower())
+    found = shutil.which(args[0]) if not pathlib.Path(args[0]).is_absolute() else None
+    if found and platform.system() == "Windows" and found.lower().endswith((".cmd", ".bat")):
+        args[0] = found  # E-131: npm / npx are .cmd files that CreateProcess cannot find by their bare name
+    exe = re.sub(r"\.(exe|cmd|bat)$", "", pathlib.Path(args[0]).name.lower())
     is_python = exe in ("python", "python3", "py")
     root = pathlib.Path(_config.root_workspace or cwd)
     if exe in ("pip", "pip3", "playwright") or (is_python and args[1:3] == ["-m", "pip"]):
@@ -372,10 +393,17 @@ def _model_command_args(command: str, cwd: str) -> list[str]:
         if py:
             rest = args[3:] if is_python else args[1:]
             return [py, "-m", "pip" if exe != "playwright" else "playwright", *rest]
-    if is_python:
-        from app.core.tools import project_python
+    from app.core.tools import project_python
 
+    if is_python:
         args[0] = project_python(root)
+    elif exe == "pytest":  # E-131: a bare pytest is the project's (its packages), as the machine note says
+        args = [project_python(root), "-m", "pytest", *args[1:]]
+    elif exe in ("ruff", "mypy", "black", "isort"):
+        py = pathlib.Path(project_python(root))
+        own = [c for c in (py.parent / f"{exe}.exe", py.parent / exe) if c.is_file()]
+        if own:
+            args[0] = str(own[0])
     return args
 
 
@@ -562,7 +590,9 @@ def _run_builtin(command: str, cwd: str) -> ShellResult | None:
         return None
 
     exe = parts[0].lower()
-    arg = parts[1] if len(parts) > 1 else ""
+    # E-131: `ls -la`, `dir /b`: flags are not paths; the first argument that is not a flag is the path
+    paths = [p for p in parts[1:] if not (p.startswith("-") or re.fullmatch(r"/[A-Za-z?]{1,2}", p))]
+    arg = paths[0] if paths else ""
     if exe == "cd":
         target = _resolve_target_path(arg, cwd)
         if err := _check_path_in_workspace(target):
@@ -632,6 +662,8 @@ def execute(
     """
     resolved_cwd = _resolve_cwd(cwd)
     timeout = timeout if timeout is not None else _config.default_timeout
+    if is_install(command) and not typed_by_user:
+        timeout = max(timeout, INSTALL_TIMEOUT_S)
 
     if not typed_by_user:
         if has_pipe_or_redirect(command):
@@ -646,7 +678,8 @@ def execute(
     if err := _check_path_in_workspace(resolved_path):
         return ShellResult(command=command, cwd=resolved_cwd, exit_code=1, output_lines=[f"✗ {err}"])
 
-    builtin_result = _run_builtin(command, resolved_cwd)
+    # E-131: a command you typed with a pipe or redirect runs in your shell, never as a builtin that drops the pipe
+    builtin_result = None if (typed_by_user and has_pipe_or_redirect(command)) else _run_builtin(command, resolved_cwd)
     if builtin_result is not None:
         return builtin_result
 

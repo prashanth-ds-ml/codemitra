@@ -18,7 +18,7 @@ def test_estimate_rounds_up():
 
 def test_views_cover_chat_and_solve():
     totals = model_view.totals()
-    assert len(totals) == 2
+    assert len(totals) == 3 and any("phased" in name for name in totals)   # E-106: the default chat is measured
     assert all(total > 0 for total in totals.values())
 
 
@@ -41,14 +41,33 @@ def test_a_full_harness_stays_under_budget():
     from app.core import chat, loop, tools
     from app.core import harness as H
 
-    h = H.Harness(rules=["x" * H.MAX_RULE_CHARS] * H.MAX_RULES)
-    for name, specs, prompt in [("chat", chat.tool_specs("approve"), chat.CHAT_PROMPT),
+    import pathlib
+
+    from app.agents import shell
+
+    note = shell.limits_text(pathlib.Path.cwd())
+    for name, specs, prompt in [("phased chat", chat.tool_specs("approve"), chat.PHASED_PROMPT + "\n\n" + note),
+                                ("router chat", chat.tool_specs("approve"), chat.CHAT_PROMPT),
                                 ("solve", tools.TOOL_SPECS, loop.SYSTEM_PROMPT)]:
-        h.tools = {s["name"]: "y" * H.MAX_TOOL_CHARS for s in specs}
-        h = H._clean(h)
+        # the worst case: every rule at full length, and the learned tool texts on the tools with the shortest
+        # descriptions (each replaces one); E-106: the phased chat is the default and was never measured
+        shortest = sorted(specs, key=lambda s: len(s["description"]))[:H.MAX_TOOL_TEXTS]
+        h = H._clean(H.Harness(rules=["x" * H.MAX_RULE_CHARS] * H.MAX_RULES,
+                               tools={s["name"]: "y" * H.MAX_TOOL_CHARS for s in shortest}))
         total = (model_view.estimate_tokens(H.apply_prompt(prompt, h))
                  + model_view.estimate_tokens(model_view._specs_text(H.apply_tools(specs, h))))
         assert total <= model_view.BUDGET_TOKENS, f"{name}: {total} tokens with a full harness"
+
+
+def test_a_harness_keeps_the_newest_rules_and_tool_texts_and_says_so(capsys):
+    from app.core import harness as H
+    from app.core import improve as I
+    h = H._clean(H.Harness(rules=[f"rule {i}" for i in range(6)], tools={"a": "1", "b": "2", "c": "3"}))
+    assert h.rules == ["rule 2", "rule 3", "rule 4", "rule 5"] and list(h.tools) == ["c"]
+    err = capsys.readouterr().err
+    assert "2 oldest rule(s) left out" in err and "2 oldest tool text(s) left out" in err
+    h2 = I.Change("tool", "x", text="new", name="d").apply(h)
+    assert list(h2.tools) == ["d"]
 
 
 

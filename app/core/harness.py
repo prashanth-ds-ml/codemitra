@@ -30,7 +30,8 @@ DEFAULT_LIMITS = {
     "max_failures": 4,       # failures of one tool in a row before the turn stops
     "fresh_round_after": 3,  # failing test runs in a row before solve starts a fresh round
 }
-MAX_RULES = 12              # keeps the prompt small (the 3K budget)
+MAX_RULES = 4               # keeps the prompt small (the 3K budget); 12 -> 4 (E-106: the phased loop measured over budget)
+MAX_TOOL_TEXTS = 1          # learned tool descriptions kept (the newest); with MAX_RULES the phased worst case fits 3K
 MAX_RULE_CHARS = 240
 MAX_TOOL_CHARS = 220          # with MAX_RULES full rules, the worst case stays in the budget (CI); 300 -> 250 when append_file and check_code were added, 250 -> 220 with package_info (must-have 11)
 
@@ -71,8 +72,14 @@ def _cut(text: str, limit: int, what: str, cut: list) -> str:
 
 def _clean(h: Harness) -> Harness:
     cut: list[str] = []
-    h.rules = [_cut(r, MAX_RULE_CHARS, f"rule {i + 1}", cut) for i, r in enumerate(h.rules) if str(r).strip()][:MAX_RULES]
-    h.tools = {str(k): _cut(v, MAX_TOOL_CHARS, f"tool text {k}", cut) for k, v in h.tools.items() if str(v).strip()}
+    rules = [_cut(r, MAX_RULE_CHARS, f"rule {i + 1}", cut) for i, r in enumerate(h.rules) if str(r).strip()]
+    if len(rules) > MAX_RULES:  # the newest are kept (as improve.Change.apply does), and the drop is said
+        cut.append(f"{len(rules) - MAX_RULES} oldest rule(s) left out")
+    h.rules = rules[-MAX_RULES:]
+    tools = {str(k): _cut(v, MAX_TOOL_CHARS, f"tool text {k}", cut) for k, v in h.tools.items() if str(v).strip()}
+    if len(tools) > MAX_TOOL_TEXTS:
+        cut.append(f"{len(tools) - MAX_TOOL_TEXTS} oldest tool text(s) left out")
+    h.tools = dict(list(tools.items())[-MAX_TOOL_TEXTS:])
     if cut:
         import sys
         print(f"codemitra: harness v{h.version}: shortened to fit the prompt budget: {', '.join(cut)}", file=sys.stderr)

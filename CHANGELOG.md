@@ -3,6 +3,15 @@
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
 ## [0.8.4] - 2026-11-15 · every must-have built (D-077)
+- **Review fixes (E-130):** labels per session; scoring never reads outside its folder; `package_info` never
+  runs the project's code; a yes to read outside covers one folder, not the folders below it.
+- **Whole-code review fixes (E-131):** `pip install -r requirements.txt` is no longer refused as inline code;
+  `npm` / `npx` work on Windows; long installs get 15 minutes and a cut-off one is not reported as running;
+  `ls -la` / `dir /b` work; a failed `git commit` in `share --push` is an error, not "shared"; `.env` and key
+  files are never read or searched; a bare `pytest` uses the project's Python; `kaggle setup` picks up a newly
+  downloaded key; scoring runs commands with the chat's own rules.
+- **The prompt stays small (E-106):** the default chat is now measured too; learned rules are capped at 4 and
+  learned tool texts at 1 (the newest are kept, and a drop is said), so the worst case fits the 3K budget.
 - **Reads outside the project (must-have 12):** give a full path and CodeMitra asks first, then reads it
   (read-only; once per folder per session). Secret files (.env, keys, ~/.ssh, ~/.kaggle) are never read.
 - **Knows its machine (must-have 11):** it knows which Python the project uses, which programs it may run and what

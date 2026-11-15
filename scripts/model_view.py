@@ -34,8 +34,18 @@ def views() -> dict[str, list[tuple[str, str]]]:
     """{view name: [(part name, text), ...]} for the chat and `codemitra solve`."""
     from app.core import chat, loop, tools
 
+    import pathlib
+
+    from app.agents import shell
+
     return {
-        "Chat (`codemitra`)": [
+        # E-106: the default chat (phased, D-071) with the machine note (must-have 11) and every tool a change uses
+        "Chat, phased (the default)": [
+            ("System prompt (`app.core.chat.PHASED_PROMPT`)", chat.PHASED_PROMPT),
+            ("Machine note (`app.agents.shell.limits_text`)", shell.limits_text(pathlib.Path.cwd())),
+            ('Tool specs (`app.core.chat.tool_specs("approve")`)', _specs_text(chat.tool_specs("approve"))),
+        ],
+        "Chat, router (`--arch router`)": [
             ("System prompt (`app.core.chat.CHAT_PROMPT`)", chat.CHAT_PROMPT),
             ('Tool specs (`app.core.chat.tool_specs("approve")`)', _specs_text(chat.tool_specs("approve"))),
         ],

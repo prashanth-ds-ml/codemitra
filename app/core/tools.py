@@ -80,6 +80,10 @@ class Workspace:
                                     "project's files, or ask them for what you need.") from None
                 self.allowed_outside.add(key)
             return full
+        if is_secret_path(full) and not full.name.lower().endswith((".example", ".sample", ".template")):
+            # E-131: inside the project too: keys never go into the chat, the traces or the Kaggle tunnel
+            raise ToolError(f"'{self.rel(full)}' holds secrets (keys, tokens, passwords): CodeMitra does not read it. "
+                            "Ask the user for the names it needs, never the values.")
         return full
 
     def show(self, full: Path) -> str:
@@ -164,8 +168,10 @@ def _commit(ws: Workspace, full: Path, new_text: str) -> None:
 
 # ── tools ────────────────────────────────────────────────────────────────────
 
-_SECRET_NAMES = re.compile(r"^(\.env.*|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa|dsa).*|\.netrc|\.git-credentials|"
-                           r"credentials(\.json)?|kaggle\.json|access_token|.*secret.*|.*token.*)$", re.I)
+# E-131: names that hold keys, not every file with "token" in it (tokenizer.py, secret_santa.py are code)
+_SECRET_NAMES = re.compile(r"^(\.env(\..+)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa|dsa)(\.pub)?|\.netrc|"
+                           r"\.git-credentials|\.pypirc|\.npmrc|credentials(\.json)?|kaggle\.json|access_token|"
+                           r"(client_)?secrets?\.(json|ya?ml|toml|txt)|(auth_)?tokens?\.(json|txt))$", re.I)
 _SECRET_DIRS = {".ssh", ".aws", ".gnupg", ".kaggle", ".azure", ".docker", ".kube"}
 
 
@@ -335,6 +341,8 @@ def search(ws: Workspace, pattern: str, path: str = ".") -> str:
     files = [base] if base.is_file() else [Path(d) / f for d, ds, fs in os.walk(base)
                                            for f in fs if not any(s in Path(d).parts for s in SKIP_DIRS)]
     for f in sorted(files):
+        if is_secret_path(f) and not f.name.lower().endswith((".example", ".sample", ".template")):
+            continue  # E-131: a search never prints a key from .env or a credentials file
         try:
             for n, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
                 if rx.search(line):

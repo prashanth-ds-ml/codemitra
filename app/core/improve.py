@@ -65,8 +65,9 @@ class Change:
         new = h.copy()
         if self.kind == "rule":
             new.rules = (new.rules + [self.text])[-H.MAX_RULES:]
-        elif self.kind == "tool":
-            new.tools = {**new.tools, self.name: self.text}
+        elif self.kind == "tool":  # the newest MAX_TOOL_TEXTS are kept (E-106: the prompt budget)
+            tools = {k: v for k, v in new.tools.items() if k != self.name}
+            new.tools = dict(list({**tools, self.name: self.text}.items())[-H.MAX_TOOL_TEXTS:])
         else:
             new.limits = {**new.limits, self.name: self.value}
         return new

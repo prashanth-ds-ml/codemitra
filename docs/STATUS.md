@@ -1,6 +1,6 @@
 # Status
 
-**Now:** v0.8.4 ready (every must-have of D-077 built: 7-13; live checks in USER_TESTS 2026-11-15; not pushed yet); v0.8.3 published for friends (`codemitra update` + a daily new-release notice, D-084; issue #11 fixed: installs land in the project's Python, E-128; v0.8.2 fixed issue #10); every pushed fix ships as a release; next: their sessions + the D-082 learn-first plan · **Last updated:** 2026-11-14 · **Repo:** https://github.com/prashanth-ds-ml/codemitra
+**Now:** v0.8.4 ready (every must-have of D-077 built: 7-13; two code reviews fixed: E-130, E-131; E-106 closed); v0.8.3 published for friends (`codemitra update` + a daily new-release notice, D-084; issue #11 fixed: installs land in the project's Python, E-128; v0.8.2 fixed issue #10); every pushed fix ships as a release; next: their sessions + the D-082 learn-first plan · **Last updated:** 2026-11-14 · **Repo:** https://github.com/prashanth-ds-ml/codemitra
 **Plan:** [PLAN.md](PLAN.md) · **Scope:** [SCOPE.md](SCOPE.md) · **Decisions:** [DECISIONS.md](DECISIONS.md) ·
 **Lessons:** [LESSONS.md](LESSONS.md) · **Open errors:** [ERROR_LOG.md](ERROR_LOG.md)
 

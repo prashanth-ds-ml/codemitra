@@ -303,6 +303,11 @@ def push(files: list[Path], *, repo: str | None = None, friend: str | None = Non
     ok, out = _git(["commit", "--quiet", "-m", f"logs: {friend}, {len(files)} session(s)"], local)
     if not ok and "nothing to commit" in out:
         return True, "already shared: nothing new to push"
+    if not ok:  # E-131: a failed commit was followed by a push of nothing that "succeeded"; the sessions were lost
+        hint = (" Tell git who you are once: `git config --global user.name \"Your Name\"` and "
+                "`git config --global user.email you@example.com`, then share again."
+                if "tell me who you are" in out.lower() or "user.email" in out.lower() else "")
+        return False, f"could not save the sessions in the logs repo: {out[:200]}{hint}"
     for _ in range(2):
         ok, out = _git(["push", "--quiet"], local)
         if ok:

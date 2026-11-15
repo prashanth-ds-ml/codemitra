@@ -150,8 +150,12 @@ def setup(source: str = "", *, echo=print, api_factory=None) -> bool:
         echo(f"✗ `{source}` is neither a file nor a Kaggle token. On kaggle.com: Settings → API → Generate New "
              "Token, copy it, then `codemitra kaggle setup <token>`.")
         return False
-    elif src is None and not target.exists() and not token_path().exists():
-        src = find_download()
+    elif src is None:
+        # E-131: also a download newer than the key in use (an expired key was kept and the new one never read)
+        found = find_download()
+        saved = max((p.stat().st_mtime for p in (target, token_path()) if p.exists()), default=None)
+        if found is not None and (saved is None or found.stat().st_mtime > saved):
+            src = found
     if src is not None:
         try:
             data = json.loads(src.read_text(encoding="utf-8"))

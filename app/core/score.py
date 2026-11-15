@@ -198,13 +198,14 @@ def _stream(chunks, step: int = 1, cancelled: Callable[[], bool] = lambda: False
 
 
 def _run_shell(ws: Path) -> Callable[[str], tuple[str, bool]]:
+    """The chat's own shell runner (allow-list, policy, no pipes, no inline code, the project's Python), inside the
+    case's workspace: a score measures what a user gets (E-131: it ran `shell=True` with no checks at all)."""
     def run(cmd: str) -> tuple[str, bool]:
-        try:
-            p = subprocess.run(cmd, shell=True, cwd=ws, capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=SHELL_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            return f"timed out after {SHELL_TIMEOUT_S}s", False
-        return ((p.stdout or "") + (p.stderr or ""))[-4000:] or f"exit {p.returncode}", p.returncode == 0
+        from app.agents import shell
+        shell.configure(workspace=str(ws), allowed_roots=[str(ws)], session_mode="auto",
+                        default_timeout=SHELL_TIMEOUT_S, stream_to_console=False)
+        r = shell.execute(command=cmd, cwd=str(ws))
+        return r.to_llm_summary(), r.ok or r.still_running
     return run
 
 
