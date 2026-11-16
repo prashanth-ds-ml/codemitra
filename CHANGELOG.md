@@ -14,6 +14,8 @@ All notable changes, newest first. Versions follow the milestones in [docs/PLAN.
   `Kaggle account: <name> (key: <where the key is>)` and whether that account's notebooks have internet. A key for
   a different account than the one set up (an old token, environment variables) stops the start and says how to
   switch on purpose (`codemitra kaggle setup`).
+- **The prompt fits its 3K budget on every machine again (E-138):** v0.8.6's CI measured 3,005-3,015 tokens; the
+  machine note and four tool texts say the same in fewer words (worst case now 2,974).
 
 ## [0.8.6] - 2026-11-16 · Kaggle start that cannot get stuck, skills and MCP servers
 - **Kaggle start no longer looks stuck or burns your hours (E-136, issue #13):** "installing Ollama" is a 1.5 GB

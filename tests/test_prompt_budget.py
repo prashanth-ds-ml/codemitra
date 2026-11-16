@@ -36,8 +36,13 @@ def test_render_lists_every_part():
             assert part in text
 
 
-def test_a_full_harness_stays_under_budget():
-    """Learned rules and tool texts are added to the fixed prompt: the most the harness allows must still fit."""
+def test_a_full_harness_stays_under_budget(monkeypatch):
+    """Learned rules and tool texts are added to the fixed prompt: the most the harness allows must still fit.
+    E-138: the machine note is measured at its longest (a project with no .venv yet, as on CI), not this checkout's."""
+    import sys
+
+    from app.core import tools as T
+    monkeypatch.setattr(T, "project_python", lambda root: sys.executable)
     from app.core import chat, loop, tools
     from app.core import harness as H
 

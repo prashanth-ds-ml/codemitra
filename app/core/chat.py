@@ -578,8 +578,8 @@ EXTRA_SPECS = [
                     "required": ["server", "tool"]}},
     {"name": "use_skill", "description": "Open a listed skill.",
      "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
-    {"name": "run_plan", "description": "Build a plan file task by task: implement each task until its "
-                                        "'Done when' tests pass, then run all tests. Runs in the plan's folder.",
+    {"name": "run_plan", "description": "Build a plan file task by task until each 'Done when' passes, "
+                                        "then run all tests. Runs in the plan's folder.",
      "parameters": {"type": "object", "properties": {"plan_path": {"type": "string"}},
                     "required": ["plan_path"]}},
 ]

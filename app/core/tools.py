@@ -751,9 +751,9 @@ def run_tests(ws: Workspace, command: str | None = None, extra: list[str] | None
 TOOL_SPECS = [
     {"name": "list_files", "description": "List files in the workspace (or a folder).",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}},
-    {"name": "read_file", "description": "Read a text file with line numbers (large files: an outline first, then "
-                                        "read a part with start/end). Read a file before editing it. Outside the "
-                                        "project: its full path (asks the user).",
+    {"name": "read_file", "description": "Read a text file with line numbers (big files: an outline, then a part "
+                                        "with start/end). Read before editing. Outside the project: its full path "
+                                        "(asks the user).",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start": {"type": "integer"},
                                                      "end": {"type": "integer"}}, "required": ["path"]}},
     {"name": "search", "description": "Find a regex in files; returns file:line: text.",
@@ -769,15 +769,15 @@ TOOL_SPECS = [
     {"name": "edit_file", "description": "Replace one exact block of lines `old` with `new` in a file you have read.",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"},
                                                      "new": {"type": "string"}}, "required": ["path", "old", "new"]}},
-    {"name": "append_file", "description": "Add content to the end of a file you wrote or read. Write long files "
-     "in parts: write_file with the first ~150 lines, then append_file for the rest.",
+    {"name": "append_file", "description": "Add content to the end of a file you wrote or read. Long files: "
+     "write_file the first ~150 lines, then append_file the rest.",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
                     "required": ["path", "content"]}},
     {"name": "check_code", "description": "Find Python errors that crash at run time (undefined names, unbound "
      "variables). Use before running a program.",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}},
-    {"name": "run_tests", "description": "Run the tests (all, or one file / a keyword; first_failure stops at the "
-     "first failure with the full traceback). Returns pass/fail and the output.",
+    {"name": "run_tests", "description": "Run the tests (all, one file or a keyword; first_failure stops at the "
+     "first failure, with its traceback). Returns pass/fail and output.",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "keyword": {"type": "string"},
                                                      "first_failure": {"type": "boolean"}}}},
     {"name": "finish", "description": "Call when the tests pass, with a one-line summary of what you did.",

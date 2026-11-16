@@ -426,7 +426,7 @@ def limits_text(root: pathlib.Path) -> str:
 
     py = project_python(root)
     if py == sys.executable:
-        where = "none yet: your first `pip install` makes the project's own .venv, and python / pytest use it"
+        where = "none yet: the first `pip install` makes the project's own .venv for python and pytest"
     else:
         p = pathlib.Path(py)
         try:
@@ -435,12 +435,12 @@ def limits_text(root: pathlib.Path) -> str:
             where = str(p)
     osname = {"Windows": "Windows", "Darwin": "macOS", "Linux": "Linux"}.get(platform.system(), platform.system())
     return ("## This machine (what you can run)\n"
-            f"- {osname}. run_command runs programs directly, not in a shell: `a && b` runs one part at a time; "
+            f"- {osname}. run_command runs programs directly, not in a shell: `a && b` runs as separate steps; "
             "pipes (|) and redirects (>) are refused.\n"
-            f"- The project's Python: {where}. pip, python -m pip and playwright all use it.\n"
-            f"- Programs you may run: {', '.join(allowed_commands())}. Anything else is refused: then do not try "
-            "other forms of it; tell the user to run it themselves by typing `! <command>`.\n"
-            "- Before using a library's API, check the installed version with package_info.")
+            f"- The project's Python: {where}. pip and playwright use it.\n"
+            f"- You may run: {', '.join(allowed_commands())}. Anything else is refused: do not try other forms; "
+            "the user can run it by typing `! <command>`.\n"
+            "- Check a library's installed version with package_info before using its API.")
 
 
 def project_venv_python(root: pathlib.Path, create: bool = True) -> str | None:
