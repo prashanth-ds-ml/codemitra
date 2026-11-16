@@ -1,10 +1,25 @@
 # Status
 
-**Now (2026-11-16, later):** v0.8.6 pushed and released; saran's retry showed the real cause: his Kaggle notebook has no internet (phone not verified). E-137/F-129 (v0.8.7): internet checked first in the notebook, Kaggle's saved settings read back, the account and its key named on every start/status/setup, a key for another account refused. Release check shown; push on the user's OK.
+**SESSION CLOSED 2026-11-16.** Handoff for the next session:
+1. **v0.8.7 is committed locally, NOT pushed** (099071b E-137 Kaggle internet check + account named; efe8bfb E-138
+   prompt budget fix for CI, L-054/L-055; plus this docs commit). Release check shown; 1,260 tests pass. On the
+   user's OK: push main → wait for CI green (L-054; v0.8.6's CI was red on the prompt budget, fixed by E-138) → tag
+   v0.8.7 + GitHub pre-release → post the drafted reply on #13 (root cause: saran's Kaggle notebook has no internet,
+   phone not verified; steps: verify phone, `codemitra update`, `kaggle status`, `kaggle start`). The reply text is in
+   the session scratchpad; rewrite it from this line if lost.
+2. saran743 (issue #13) is blocked until v0.8.7 is out. His account is `saisarann`.
+3. New ideas waiting for the user's go (SCOPE): I-31 learning-curve proof of self-improvement, I-32 task records with
+   verified outcomes, I-33 usage report (tasks, tokens, time, cost). Suggested order: I-32 → I-33 → I-31.
+4. Still pending from before: live checks (practice --repeats 3 before/after E-133, qwen3.5 vs coderparse), the new
+   Kaggle notebook not yet run live on our account, issue #12 reply (fixed in v0.8.5/0.8.6, released).
+5. Laptop: an old `improve --chat --rounds 1` process (from the installed CodeMitra) kept a 5.8 GB model loaded and
+   free RAM at 0.8 GB; it was not stopped (needs the user's OK).
+
+**Now (2026-11-16, later):** v0.8.6 pushed and released; saran's retry showed the real cause: his Kaggle notebook has no internet (phone not verified). E-137/F-129 (v0.8.7): internet checked first in the notebook, Kaggle's saved settings read back, the account and its key named on every start/status/setup, a key for another account refused. Release check shown; push on the user's OK. CI on v0.8.6 was red (prompt budget 3,005-3,015 > 3,000): E-138/F-130 fixed it (worst case 2,974).
 
 **Earlier (2026-11-16):** issue #13 (saran743, new tester: `/kaggle start` stuck at "installing Ollama") fixed as E-136/F-128: install time limits + retry, a `still installing · N min` line, and a 45-minute not-ready watchdog in the notebook so a stuck run cannot burn GPU hours. v0.8.6 (everything below + E-136) is ready, release check shown, waiting for the user's OK to push; then saran runs `codemitra update` and tries again. The live Kaggle check of the new notebook is still to do. Self-improvement proof plan (learning curve on 52+ held-out tasks, verified lessons memory) proposed, waiting for the user's go.
 
-**Before (2026-11-15):** v0.8.4 published; v0.8.5 (E-132, issue #12) + threads/coach/practice/live fixes + the six research quick wins (E-133/F-125, `reports/CodeMitra next features research.md`) + skills and MCP servers from the CLI (E-134/F-126: `skills add|remove|import claude`, `mcp add|remove|import cursor|vscode`, short skill index + `use_skill`; 1,245 tests) are committed locally, **not pushed** (plan agreed: live checks, then release v0.8.6 on the user's OK). Live checks pending (Kaggle started 2026-11-15 evening, stayed queued for over 1.5 h): practice `--repeats 3` before/after E-133, and qwen3.5 vs qwen3.5-coderparse (laptop had 5.4 GB free RAM; Kaggle not started; the SearXNG uv fix on Kaggle is also unproven). Next from the research (medium): best-of-N on Kaggle with tests as the judge, 4B→9B on failing tests, verified lessons memory (ReMe rules), the D-082 replay + "same mistake twice". · **Last updated:** 2026-11-15 · **Repo:** https://github.com/prashanth-ds-ml/codemitra
+**Before (2026-11-15):** v0.8.4 published; v0.8.5 (E-132, issue #12) + threads/coach/practice/live fixes + the six research quick wins (E-133/F-125, `reports/CodeMitra next features research.md`) + skills and MCP servers from the CLI (E-134/F-126: `skills add|remove|import claude`, `mcp add|remove|import cursor|vscode`, short skill index + `use_skill`; 1,245 tests) are committed locally, **not pushed** (plan agreed: live checks, then release v0.8.6 on the user's OK). Live checks pending (Kaggle started 2026-11-15 evening, stayed queued for over 1.5 h): practice `--repeats 3` before/after E-133, and qwen3.5 vs qwen3.5-coderparse (laptop had 5.4 GB free RAM; Kaggle not started; the SearXNG uv fix on Kaggle is also unproven). Next from the research (medium): best-of-N on Kaggle with tests as the judge, 4B→9B on failing tests, verified lessons memory (ReMe rules), the D-082 replay + "same mistake twice". · **Last updated:** 2026-11-16 · **Repo:** https://github.com/prashanth-ds-ml/codemitra
 
 **Before (2026-11-14):** v0.8.4 ready (every must-have of D-077 built: 7-13; two code reviews fixed: E-130, E-131; E-106 closed); v0.8.3 published for friends (`codemitra update` + a daily new-release notice, D-084; issue #11 fixed: installs land in the project's Python, E-128; v0.8.2 fixed issue #10)
 **Plan:** [PLAN.md](PLAN.md) · **Scope:** [SCOPE.md](SCOPE.md) · **Decisions:** [DECISIONS.md](DECISIONS.md) ·

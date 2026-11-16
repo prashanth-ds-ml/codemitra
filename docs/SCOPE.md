@@ -175,6 +175,35 @@ New ideas land here first, with a one-line impact guess. They move into PLAN.md 
 - **I-30 Tests first: generating tests is easier than code** (AlphaCodium's key observation): supports the
   tester / builder split (B5); I-27 protects against a wrong model-written test. Their negative results also back the
   small fix prompt: adding the run trace, the last K failed tries or the last diff gave no gain (keep it out).
+- **I-31 Prove self-improvement with a learning curve** (user, 2026-11-15: "how we can show its self improving,
+  without that i feel their is no value"). Today: harness v0, no rule ever kept; every gain so far came from code
+  fixes. Claim to prove: same model and weights, no stronger model's help, more *held-out* practice tasks solved
+  after learning from its own runs, beyond the noise, and the gain gone when the learning is removed. How: 52+
+  held-out tasks x 2-3 repeats, paired per task (margin ~+-8 points, was +-32 on 9); generations gen0 -> learn on the
+  learn split -> gen1 ... (3-4); a frozen control arm; an ablation; every run kept in `results/learning_curve.jsonl`
+  and a README chart. Lever: verified lessons memory (ReMe-style, a lesson kept only if a re-run with it passes),
+  then best-of-N with tests as judge, later RFT LoRA. Cost ~1-1.5 Kaggle h per generation. Exit rule: no gain after 4
+  generations -> say so publicly, move to fine-tuning. Until a gain: README says "built to improve itself; measured
+  gain so far: none yet". Impact: high (the project's main claim). Waiting for the user's go.
+- **I-32 Task records with verified outcomes** (user, 2026-11-16: "we need to have proper way to record a task ...
+  how we are going to verify"). A task = one request until done or dropped (follow-ups on the same files / thread
+  join it; `/new`, another project, `/done`, `/bad`, 24 h idle end it; shown as `task 3 · "..." · 4 turns`,
+  correctable with `/task new|same`). Kinds: change (existing project), new from scratch, question, run/setup.
+  Labels from the strongest evidence: ✓ by you (`/done`, `/good`); ✓ by checks (tests that existed BEFORE, or the
+  plan's "Done when" checks agreed BEFORE coding, pass, and you did not undo or rewrite >=50% of its lines within a
+  day: `user_edit`); ✗ failed (`/bad`, tests failing at the end, stopped, undone / rewritten, asked again);
+  ? unverified (never counted as success); "kept, unchecked" shown apart. Model-written tests after the code are
+  weak evidence only. From scratch: "Done when" checks written and shown before any code (D-065). Validation before
+  any number is public: unit tests per rule; practice tasks through the chat with hidden tests (target 0 false
+  "verified"); 50 real tasks hand-labelled by the user and Claude (target >= 90% agreement). Headline split by kind;
+  real use describes, the fixed practice set (I-31) proves improvement. ~1-2 days. Impact: high (needed by I-33 and
+  I-31).
+- **I-33 Usage report: tasks, tokens, time, cost** (user, 2026-11-16). `codemitra stats` + a dashboard section +
+  a generated README block from `results/`: tasks verified / failed / unverified (I-32), local vs Kaggle (GPU hours),
+  tokens in/out, median and total time, cost per verified task vs a paid API at typical tokens (labelled estimate),
+  local electricity as watts x time (estimate, never claimed as measured), by version. No "time saved" claim (not
+  measurable) unless tasks are timed by hand. Data already logged per turn (tokens_in/out, seconds, backend, outcome,
+  verdict, tests_passed, user_edit). ~0.5 day after I-32. Impact: medium-high (evidence for friends and posts).
 
 ## Later (not milestones)
 Data pack, CodeMitra as an MCP server, debug-brief experiment, escalation ladder,
