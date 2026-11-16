@@ -84,6 +84,19 @@ threading.Thread(target=_ready_watchdog, daemon=True).start()"""
 INSTALL = """# Install Ollama (a 1.5 GB download, usually 1-3 minutes) and show the GPUs. E-136: each step has a time limit and
 # the download is tried twice; if it still fails the run ends with the reason instead of waiting
 import shutil
+# E-137: internet first, in seconds. Kaggle gives a notebook internet only once the account's phone is verified; without
+# it the install below can only time out (issue #13: "curl: (28) Resolving timed out" after 7 minutes)
+try:
+    _r = subprocess.run(["curl", "-sS", "-o", "/dev/null", "--max-time", "20", "https://ollama.com"],
+                        capture_output=True, text=True, timeout=40)
+    _net_problem = "" if _r.returncode == 0 else (_r.stderr.strip() or f"curl exit {_r.returncode}")[-160:]
+except Exception as exc:
+    _net_problem = f"{type(exc).__name__}: {exc}"[-160:]
+say("net", ok=not _net_problem)
+if _net_problem:
+    say("error", detail="no internet on this notebook: " + _net_problem)
+    raise SystemExit("No internet on this notebook. On kaggle.com: your picture -> Settings -> Phone verification, "
+                     "then start again.")
 say("installing", gb=1.5)
 
 def _sh(cmd, minutes):

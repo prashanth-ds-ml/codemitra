@@ -4,6 +4,17 @@ All notable changes, newest first. Versions follow the milestones in [docs/PLAN.
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-16 · Kaggle: which account, and does it have internet
+- **No internet on Kaggle is found in seconds and named (E-137, issue #13):** the notebook checks its internet before
+  installing anything; without it the run ends at once with "Kaggle account <name>: its notebooks get no internet ...
+  verify your phone" (Kaggle gives notebooks internet only after the phone is verified, but shows the GPU hours
+  before). CodeMitra also reads back the settings Kaggle saved for the notebook and says so straight away if
+  internet is off.
+- **CodeMitra says which Kaggle account it uses:** `kaggle start`, `kaggle status` and `kaggle setup` show
+  `Kaggle account: <name> (key: <where the key is>)` and whether that account's notebooks have internet. A key for
+  a different account than the one set up (an old token, environment variables) stops the start and says how to
+  switch on purpose (`codemitra kaggle setup`).
+
 ## [0.8.6] - 2026-11-16 · Kaggle start that cannot get stuck, skills and MCP servers
 - **Kaggle start no longer looks stuck or burns your hours (E-136, issue #13):** "installing Ollama" is a 1.5 GB
   download; CodeMitra now says so and shows `still installing Ollama · 3 min` every minute. The download has a time

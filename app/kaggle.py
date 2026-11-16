@@ -183,11 +183,83 @@ def setup(source: str = "", *, echo=print, api_factory=None) -> bool:
     except KaggleError as exc:
         echo(f"✗ {exc}")
         return False
-    echo(f"✓ signed in to Kaggle as {username(api)} · " + quota_line(q))
+    from app import backend
+    user = username(api)
+    if backend.prefs().get("kaggle_account") != user:
+        backend.save_prefs(kaggle_account=user, kaggle_internet={})  # E-137: this is the account CodeMitra uses now
+    echo(f"✓ signed in to Kaggle as {user} (key: {key_source()}) · " + quota_line(q))
     if not q.get("total_h"):
         echo("⚠ no GPU hours shown: verify your phone on kaggle.com → Settings (GPU and internet need it)")
+    else:  # E-137: hours are shown before the phone is verified too; notebooks get internet only after it
+        echo("  Phone verified? Kaggle gives notebooks internet only then (kaggle.com → Settings → Phone "
+             "verification); the first `codemitra kaggle start` checks it.")
     echo("Next: `codemitra kaggle start` (4-8 minutes), then `codemitra` in any project folder. `codemitra kaggle stop` when done.")
     return True
+
+
+NO_INTERNET = ("Kaggle account {user}: its notebooks get no internet, so the notebook cannot download Ollama. Kaggle "
+               "turns internet on only after the account's phone is verified: kaggle.com → your picture → Settings → "
+               "Phone verification. Then `codemitra kaggle start` again.")
+
+
+def key_source() -> str:
+    """Where the Kaggle key in use comes from, in the order the kaggle library reads them (E-137)."""
+    if os.environ.get("KAGGLE_API_TOKEN"):
+        return "the KAGGLE_API_TOKEN environment variable"
+    if token_path().exists() or token_path().with_suffix(".txt").exists():
+        return str(token_path())
+    if os.environ.get("KAGGLE_USERNAME") and os.environ.get("KAGGLE_KEY"):
+        return "the KAGGLE_USERNAME / KAGGLE_KEY environment variables"
+    if key_path().exists():
+        return str(key_path())
+    return "Kaggle's saved sign-in"
+
+
+def _remember_internet(user: str, ok: bool) -> None:
+    from app import backend
+    backend.save_prefs(kaggle_internet={"user": user, "ok": ok, "checked": datetime.now().strftime("%Y-%m-%d")})
+
+
+def account_line(user: str) -> str:
+    """e.g. 'Kaggle account: saisarann (key: ~/.kaggle/access_token) · internet: none, verify your phone' (E-137)."""
+    from app import backend
+    net = backend.prefs().get("kaggle_internet") or {}
+    note = ""
+    if isinstance(net, dict) and net.get("user") == user:
+        note = (f" · internet: ok (checked {net.get('checked')})" if net.get("ok") else
+                " · internet: none on its notebooks (verify your phone on kaggle.com → Settings)")
+    return f"Kaggle account: {user} (key: {key_source()}){note}"
+
+
+def check_account(api, echo=print) -> str:
+    """The account this key signs in to; it must be the one set up (E-137: the key Kaggle's library picks first may be
+    another account's, e.g. an old access_token or environment variables, and nothing said which account ran)."""
+    from app import backend
+    user = username(api)
+    saved = backend.prefs().get("kaggle_account")
+    if saved and saved != user:
+        raise KaggleError(f"CodeMitra was set up with Kaggle account {saved}, but the key it finds now is for {user} "
+                          f"(from {key_source()}). To use {user} on purpose: `codemitra kaggle setup`; to keep {saved}: "
+                          f"remove that key.")
+    if not saved:
+        backend.save_prefs(kaggle_account=user)
+    echo("  " + account_line(user))
+    return user
+
+
+def granted(api, ref: str) -> dict:
+    """The settings Kaggle actually saved for the notebook ({} if it cannot tell): enable_internet, machine_shape, ..."""
+    import shutil
+    folder = _home() / "kaggle-check"
+    shutil.rmtree(folder, ignore_errors=True)
+    try:
+        _timed(lambda: api.kernels_pull(ref, path=str(folder), metadata=True), timeout=60)
+        data = json.loads((folder / "kernel-metadata.json").read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001 - only a quick look; the notebook checks its internet itself
+        return {}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)  # it holds the notebook, with this session's token
 
 
 def username(api) -> str:
@@ -288,7 +360,7 @@ def start(model: str, ctx: int = 262_144, *, idle_min: int = 30, max_hours: floa
     """Upload and run the notebook, follow it until ready, point CodeMitra at it. Returns the remote settings."""
     from app import remote
     api = api or client()
-    user = username(api)
+    user = check_account(api, echo)  # E-137: name the account; refuse one that is not the account set up
     ref = f"{user}/{SLUG}"
     state = load_state()
     if state.get("ref") == ref and state.get("token"):
@@ -318,6 +390,10 @@ def start(model: str, ctx: int = 262_144, *, idle_min: int = 30, max_hours: floa
     state = {"ref": ref, "token": token, "model": model, "ctx": ctx, "pushed": time.time(),
              "url": str(getattr(resp, "url", "") or f"https://www.kaggle.com/code/{ref}"), "idle_min": idle_min}
     save_state(state)
+    if granted(api, ref).get("enable_internet") is False:  # E-137: Kaggle saved it without internet: say so now
+        _remember_internet(user, False)
+        raise KaggleError(NO_INTERNET.format(user=user) + " (Kaggle saved this notebook with internet off; the run "
+                          "ends by itself within a minute of starting.)")
     return _follow(api, ref, state, ctx, wait_min, echo, sleep)
 
 
@@ -376,9 +452,15 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep, 
                 if key in seen:
                     continue
                 seen.add(key)
+                if stage == "net":  # E-137: the notebook's own internet check, remembered for this account
+                    _remember_internet(ref.split("/")[0], fields.get("ok") == "True")
                 if stage == "error":
                     stop.set()
-                    raise KaggleError(f"The notebook failed: {fields.get('detail', '?')}. Log: {state.get('url')}")
+                    detail = fields.get("detail", "?")
+                    if detail.startswith("no internet"):
+                        raise KaggleError(NO_INTERNET.format(user=ref.split("/")[0]) + f" (the notebook: {detail}.) "
+                                          f"Log: {state.get('url')}")
+                    raise KaggleError(f"The notebook failed: {detail}. Log: {state.get('url')}")
                 if stage == "search":  # must-have 10: SearXNG on the notebook passed its engine test, or not
                     search_ok = fields.get("ok") == "True"
                     echo(f"  ✓ web search ready ({fields.get('results')} results in a test)" if search_ok else
@@ -465,6 +547,7 @@ def status(*, echo=print, api=None) -> None:
     r = remote.active()
     try:
         api = api or client()
+        echo(account_line(username(api)))  # E-137: which account, which key
         if state.get("ref"):
             run, failure = run_status(api, state["ref"])
             echo(f"Kaggle run: {run.lower()}{' · ' + failure if failure else ''} · {state.get('model', '?')} at "
