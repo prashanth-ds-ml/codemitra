@@ -19,6 +19,12 @@ body:
     attributes:
       label: Model and context
       description: From the CodeMitra header, e.g. "qwen3.5:4b 64K".
+  - type: input
+    id: version
+    attributes:
+      label: CodeMitra version
+      description: "`codemitra --version` (run `codemitra update` first if you can)"
+      placeholder: "0.8.6"
   - type: textarea
     id: tried
     attributes:

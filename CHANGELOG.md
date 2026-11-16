@@ -3,6 +3,12 @@
 All notable changes, newest first. Versions follow the milestones in [docs/PLAN.md](docs/PLAN.md).
 
 ## [Unreleased]
+
+## [0.8.6] - 2026-11-16 · Kaggle start that cannot get stuck, skills and MCP servers
+- **Kaggle start no longer looks stuck or burns your hours (E-136, issue #13):** "installing Ollama" is a 1.5 GB
+  download; CodeMitra now says so and shows `still installing Ollama · 3 min` every minute. The download has a time
+  limit and is tried twice; if it fails, the run ends and tells you why. A notebook that is not ready 45 minutes after
+  it starts stops itself, so a stuck run can no longer use your GPU hours until Kaggle's 11.5 h limit.
 - **A long Kaggle queue no longer wastes a run (E-135):** `kaggle start` waits up to 2 hours in Kaggle's queue
   (no hours used) and then 20 minutes from when it runs; `kaggle status` says how to connect to a run nobody follows.
 - **Add skills and MCP servers (E-134):** `codemitra skills add <folder or git URL>` / `remove` / `import claude`;

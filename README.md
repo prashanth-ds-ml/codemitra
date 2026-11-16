@@ -4,7 +4,7 @@
 reads your code, changes files (asking first), runs your tests and fixes what fails. It runs on your own GPU through
 [Ollama](https://ollama.com), or on a free Kaggle GPU when your laptop is too small. No API key, no subscription.
 
-> **Preview (v0.8.5)**, for friends: it works for everyday tasks on 4-9B models, and it is still rough. Please try it
+> **Preview (v0.8.6)**, for friends: it works for everyday tasks on 4-9B models, and it is still rough. Please try it
 > and tell me what breaks. (Until v0.7 it was called Mitra: see [Upgrading from Mitra](docs/guide/SETUP.md#upgrading-from-mitra).)
 
 ## Set up (one command, ~15 minutes)

@@ -58,12 +58,54 @@ def say(stage, **kw):
     print("MITRA|" + stage + "".join(f"|{k}={clean(v)}" for k, v in kw.items()), flush=True)
 
 say("started", model=MODEL, context=CONTEXT)
-print("model", MODEL, "| context", CONTEXT)"""
+print("model", MODEL, "| context", CONTEXT)
 
-INSTALL = """# Install Ollama (about 1 minute) and show the GPUs
-say("installing")
-!apt-get -qq update > /dev/null && apt-get -qq install -y zstd pciutils lshw > /dev/null
-!curl -fsSL https://ollama.com/install.sh | sh
+# E-136: if the server is not ready READY_MAX_MIN minutes after the start (a stuck download, ...), the notebook stops
+# itself, so a stuck run cannot use the GPU hours up to Kaggle's time limit (the idle stop starts only when ready)
+import os, signal, subprocess, threading, time
+READY_MAX_MIN = 45
+READY_FILE = "/kaggle/working/ready"
+if os.path.exists(READY_FILE):
+    os.remove(READY_FILE)
+
+def _ready_watchdog():
+    t0 = time.time()
+    while time.time() - t0 < READY_MAX_MIN * 60:
+        if os.path.exists(READY_FILE):
+            return
+        time.sleep(15)
+    say("error", detail=f"not ready after {READY_MAX_MIN} min, so it stopped itself to save your GPU hours")
+    time.sleep(5)
+    subprocess.run(["pkill", "-P", str(os.getpid())])
+    os.kill(os.getpid(), signal.SIGKILL)
+
+threading.Thread(target=_ready_watchdog, daemon=True).start()"""
+
+INSTALL = """# Install Ollama (a 1.5 GB download, usually 1-3 minutes) and show the GPUs. E-136: each step has a time limit and
+# the download is tried twice; if it still fails the run ends with the reason instead of waiting
+import shutil
+say("installing", gb=1.5)
+
+def _sh(cmd, minutes):
+    try:
+        with open("/kaggle/working/install.log", "a") as log:
+            return subprocess.run(cmd, shell=True, stdout=log, stderr=subprocess.STDOUT,
+                                  timeout=minutes * 60).returncode == 0
+    except subprocess.TimeoutExpired:
+        print(f"timed out after {minutes} min: {cmd[:60]}", flush=True)
+        return False
+
+_sh("apt-get -qq update && apt-get -qq install -y zstd pciutils lshw", 5)
+for attempt in (1, 2):
+    t0 = time.time()
+    if _sh("curl -fsSL --retry 2 --connect-timeout 30 https://ollama.com/install.sh | sh", 12) and shutil.which("ollama"):
+        print(f"Ollama installed in {time.time() - t0:.0f} s", flush=True)
+        break
+    print(f"installing Ollama: attempt {attempt} failed after {time.time() - t0:.0f} s", flush=True)
+else:
+    lines = [l.strip() for l in open("/kaggle/working/install.log", errors="replace").read().splitlines() if l.strip()]
+    say("error", detail="could not install Ollama (tried twice): " + (lines[-1][-160:] if lines else "no output"))
+    raise SystemExit("could not install Ollama: see /kaggle/working/install.log")
 !nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv"""
 
 START = """# Start Ollama: flash attention + q8_0 KV cache (half the context memory), one model kept loaded
@@ -212,6 +254,7 @@ for _ in range(30):  # a new tunnel name takes a few seconds to resolve
         time.sleep(3)
 else:
     print("⚠ the tunnel did not answer yet; try the line below anyway in a minute")
+open(READY_FILE, "w").close()  # E-136: the watchdog stands down; the idle stop below takes over
 say("ready", url=public, model=MODEL, context=CONTEXT)  # the token is not printed: CodeMitra already has it
 print()
 print("On your laptop, run:")

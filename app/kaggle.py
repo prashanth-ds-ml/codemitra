@@ -31,7 +31,7 @@ API_TIMEOUT_S = 60
 STAGE_RE = re.compile(r"MITRA\|([a-z_]+)((?:\|[a-z_]+=[^|\r\n\"\\]*)*)")
 STAGE_TEXT = {
     "started": "notebook started",
-    "installing": "installing Ollama",
+    "installing": "installing Ollama (a 1.5 GB download, usually 1-3 minutes)",
     "pulling": "downloading the model",
     "loading": "loading it at full context",
     "loaded": "model loaded",
@@ -321,6 +321,8 @@ def start(model: str, ctx: int = 262_144, *, idle_min: int = 30, max_hours: floa
     return _follow(api, ref, state, ctx, wait_min, echo, sleep)
 
 
+READY_MAX_MIN = 45   # E-136: the notebook stops itself if it is not ready this long after it starts
+TICK_S = 60          # E-136: a long step says it is still going every minute (it looked stuck)
 QUEUE_MAX_MIN = 120  # E-135: Kaggle may hold a GPU run in its queue for over an hour; no hours are used meanwhile
 
 
@@ -337,6 +339,7 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep, 
     from app import remote
     deadline = clock() + queue_min * 60
     running = False
+    step, step_t, tick = "", 0.0, 0.0  # E-136: the step it is on, since when, and the last "still ..." line
     seen: set[str] = set()
     search_ok = False  # must-have 10: set by the notebook's "search" line
     while clock() < deadline:
@@ -358,6 +361,9 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep, 
         threading.Thread(target=_log_lines, args=(api, ref, q, stop), daemon=True).start()
         buffer = ""
         while clock() < deadline:
+            if step and clock() - tick >= TICK_S:  # E-136: a long step shows it is still going
+                tick = clock()
+                echo(f"  · still {step.split(' (')[0]} · {int((tick - step_t) // 60)} min")
             try:
                 chunk = q.get(timeout=15)
             except Empty:
@@ -398,13 +404,15 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep, 
                     return data
                 elif stage in STAGE_TEXT:
                     echo(f"  · {STAGE_TEXT[stage]}")
+                    step, step_t, tick = STAGE_TEXT[stage], clock(), clock()
         stop.set()
         sleep(5)
     if not running:
         raise KaggleError(f"Still in Kaggle's queue after {queue_min:.0f} minutes (no GPU hours used). "
                           "`codemitra kaggle start` follows it again; `codemitra kaggle stop` cancels it.")
-    raise KaggleError(f"Not ready {wait_min:.0f} minutes after it started running. `codemitra kaggle start` follows "
-                      f"it again; the log: {state.get('url')}")
+    raise KaggleError(f"Not ready {wait_min:.0f} minutes after it started running. It stops itself if it is not ready "
+                      f"{READY_MAX_MIN} minutes after it started; `codemitra kaggle stop` ends it now, `codemitra kaggle "
+                      f"start` follows it again. The log: {state.get('url')}")
 
 
 def stop(*, echo=print, api=None, sleep=time.sleep, wait_s: float = 90) -> None:
