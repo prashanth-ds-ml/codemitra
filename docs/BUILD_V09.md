@@ -11,7 +11,7 @@ they are checked. Four releases, each usable on its own; each one: tests that fa
 green, live checks, then the release on your OK. Not in this batch: SPEC_DRIVEN S0-S6 (I-37); S0 (1 day) could go
 first if you want it.
 
-## v0.9.0 · Skills and MCP servers (~2 days)
+## v0.9.0 · Skills and MCP servers (~3-4 days: batch 1 skills with practice tasks; batch 2 after)
 
 **What exists (checked 2026-11-17):** 23 skills in the repo's `skills/`, found only when the open project has its
 own `skills/` folder, so in a user's project there are none; the skill index in the system prompt is cut at 800
@@ -21,9 +21,18 @@ set.
 
 | Feature | Acceptance criteria (check) |
 |---|---|
-| **F-1 Built-in skills reach every project** | AC-1 a curated set ships inside the package (`app/builtin_skills/`, so it works for clones and wheels) and is found in any folder (unit test with an empty project) · AC-2 order: project skill > yours (`~/.codemitra/skills`) > built-in, same name wins in that order (unit) · AC-3 `/skills` shows where each one comes from (driven chat test). The curated list is yours to approve: proposed coding, debugging, testing, review, fastapi, react, docker, markdown, rag, langgraph + the three new ones; personal ones (karapathy, docs-obsidian-memory, the numbered 01-11 set) stay repo-only |
-| **F-2 The right skill is offered, not cut off** | AC-1 the index in the system prompt stays short and **fixed** (it is the cached prefix: changing it per request makes Ollama re-read the whole prompt) · AC-2 when a request matches a skill by name or keywords (rules, no model call), the phase note says "skill `xlsx` fits: call use_skill first", even if the index never listed it (unit tests with "make an excel sheet of expenses", "export as pdf", "write a word document") · AC-3 prompt budget test still passes |
-| **F-3 Excel, PDF, Word skills** | AC-1 `xlsx` (openpyxl), `pdf` (reportlab, read back with pypdf), `docx` (python-docx): each SKILL.md under ~2,500 characters, step by step for a 4-9B model, one small example, installs through the project's Python (E-128) · AC-2 the last step opens the produced file and checks it (sheet names and cell values; page count and text; headings and paragraphs) · AC-3 practice: 3 tasks per format through the chat with a hidden check that opens the file, run on qwen3.5 4B and 9B, results in EVALS.md whatever they show |
+**Decision (2026-11-17, deep dive):** the 23 skills imported from local-codex on 2026-10-24 are discarded. They were
+never changed, never used (0 `use_skill` calls in all real logs), never reached a user's project, and are principles a
+small model cannot act on ("make the smallest coherent change"), repeating CodeMitra's own phase notes; four were
+duplicate pairs. Git history keeps them. New skills start clean, under the rules in F-0.
+
+| Feature | Acceptance criteria (check) |
+|---|---|
+| **F-0 What a built-in skill must be** | AC-1 under ~2,500 characters, one clear trigger, exact commands, one small worked example, the pitfalls we have actually hit, and a last step that **checks the result with a command** · AC-2 it ships only if its practice tasks (2-3 each, hidden checks) pass more often **with** it than without it, on qwen3.5 4B and 9B; results in EVALS.md whatever they show · AC-3 a skill that stops helping is dropped (same rule as harness lessons) |
+| **F-1 Clean start, built-in skills in every project** | AC-1 the repo's `skills/` (23 old skills) removed; `tests/test_skills.py`'s karapathy test replaced · AC-2 new skills ship inside the package (`app/builtin_skills/`, so clones and wheels both have them) and are found in any folder (unit test with an empty project) · AC-3 order: project skill (`skills/`, `.codemitra/skills`) > yours (`~/.codemitra/skills`) > built-in; the same name wins in that order (unit) · AC-4 `/skills` shows each skill, where it comes from, and whether it is active for this project (driven chat test) |
+| **F-2 CodeMitra picks the skill itself** | AC-1 **by project type**: at session start, rules (no model call) read the project's files and dependencies and turn on the matching skills, e.g. `pygame` → python-game, `streamlit` → streamlit-app, `fastapi` → fastapi-service, `pymongo` → mongodb-data, `.html` with no `package.json` → web-page, `.sql` / sqlite → sql-query (unit test per signal with a temp project) · AC-2 **by request**: "make an excel sheet", "export as pdf", "write a word document", "write a long doc" → the file or writing skill for that turn (unit) · AC-3 the system prompt lists only the 1-4 skills active for this project and stays **fixed** for the session (it is Ollama's cached prefix); a request match is a note for that turn, not a prompt change · AC-4 `codemitra.toml` `skills = [...]` pins or turns off skills for a project; `/skill <name>` uses one now · AC-5 every use is recorded (which skill, for which task: feeds F-10 and the with / without comparison) · AC-6 prompt budget test still passes |
+| **F-3 Batch 1 skills (v0.9.0)** | **Files:** `xlsx` (openpyxl), `pdf` (reportlab, read back with pypdf), `docx` (python-docx): the last step opens the file and checks it (sheet names and cells; page count and text; headings) · **Project types:** `python-game` (pygame structure and loop, headless tests with `SDL_VIDEODRIVER=dummy`, testing key handling: the Neon Chomp / pause-key failures), `streamlit-app` (layout, `st.session_state`, run headless, test with Streamlit's `AppTest`: Trip Splitter) · **Any project:** `long-document` (outline first, ~60-line parts with `append_file`, check headings at the end: E-141). Each passes F-0 |
+| **F-3b Batch 2 skills (after v0.9.0)** | **Project types:** `web-page` (static HTML / CSS / JS, serve locally, check with the Playwright server: issue #11), `fastapi-service` (routes + Pydantic, `TestClient`, uvicorn smoke check), `mongodb-data` (connection from `.env`, `mongomock` in tests, indexes), `sql-query` (query in a `.sql` file, tested with `sqlite3`) · **Any project:** `debugging` (reproduce with a failing test, read the last traceback line, one fix, rerun), `writing-tests` (pytest layout and naming, run one test, red then green), `code-review` (a concrete checklist, findings as path:line), `python-setup` (venv in the project, install with the project's Python, requirements, README run steps: issues #10, #11, E-128) · Later candidates: react-app, cli-tool, docker, pptx, charts, spec-writer (with I-37). Each passes F-0 |
 | **F-4 Four MCP servers, one command each** | AC-1 `codemitra mcp add playwright` and `mongodb` added to the built-in list, off until you turn them on (`/mcp on playwright`), versions pinned · AC-2 MongoDB starts **read-only** by default, asks for its connection string and keeps it in this machine's config, never in the project · AC-3 GitHub and Context7: live check that they start and answer · AC-4 no `npx` / Node on the machine: one plain line saying how to install it (unit) · AC-5 every tool still asks before it runs except the read-only ones listed (existing rule, unit) · AC-6 live check: each of the four starts on this laptop and one tool call works |
 
 ## v0.9.1 · Logging and tracing for self-improvement (~3 days)
@@ -64,6 +73,6 @@ Vercel (Vercel's addresses change, so this is usually "allow from anywhere", pro
 password; say if you prefer otherwise).
 
 ## Order, size, open choices
-v0.9.0 → v0.9.1 → v0.9.2 → v0.9.3, about 8 working days, each released when its checks pass. To confirm before
-starting: (1) the curated built-in skill list in F-1; (2) MongoDB MCP read-only by default; (3) Atlas network access as
+v0.9.0 → v0.9.1 → v0.9.2 → v0.9.3, about 9-10 working days (batch 2 skills alongside), each released when its checks pass. To confirm before
+starting: (1) built-in skills: decided 2026-11-17 (F-0 to F-3b); (2) MongoDB MCP read-only by default; (3) Atlas network access as
 above; (4) whether SPEC_DRIVEN S0 goes first.
