@@ -309,6 +309,8 @@ it. A gain in solved tasks that costs much more tokens or time is reported as a 
 | Phase | What | Size |
 |---|---|---|
 | 1. Evidence | task records (I-32) with tokens and time per task (model / tools / your time), snapshot, edits after the session, kind, mistake tag, lessons used | 2-3 days |
+
+**2026-11-17:** Phase 1's task records hang on the spec structure of [SPEC_DRIVEN.md](SPEC_DRIVEN.md) (I-37): a task is a spec task (feature / task / criterion IDs), chat work outside any feature is "unplanned"; build SPEC_DRIVEN S0-S3 as Phase 1.
 | 2. Replay set | failures → cases, in the existing fair test, with cost per case | 1-2 days |
 | 3. Proof baseline | live report (I-33) + held-out exam generation 0 (I-31), both with tokens and time | 1-2 days + Kaggle hours |
 | 4. Learning rounds | generations 1, 2, 3 ... with the curve; coach only when stuck | ongoing |
