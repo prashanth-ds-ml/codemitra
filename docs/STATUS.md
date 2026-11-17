@@ -1,6 +1,6 @@
 # Status
 
-**2026-11-17, later: v0.8.8 ready (I-34, E-139/F-131), committed, push on the user's OK after the release check.**
+**2026-11-17, later: v0.8.8 PUBLISHED** (714b869, CI green after E-140/F-132: 2 guide tests needed a real key; tag v0.8.8 + pre-release). User messages saran directly (no #13 comment posted).
 Kaggle setup checklist (account, key, phone = notebook internet, GPU hours, first run; done steps shown ✓), `codemitra
 kaggle check` / `/kaggle check` with a CPU-only internet probe (live on our account: 22-25 s, no GPU hours; internet-off
 probe gave #13's exact error in 46 s), `kaggle start` checks internet before any GPU push, the guide opens the page and
