@@ -256,3 +256,59 @@ works. With guidance only, every kept change is CodeMitra's own, and the records
 3. The "same mistake twice" number and the stuck trigger, on the dashboard.
 4. `codemitra coach` becomes the guide: runs only when stuck (or when you ask), writes guidance, never rules.
 5. CodeMitra's round reads open guidance and proposes from it.
+
+## 15. Learn properly, prove it, at what cost (2026-11-17) · PLAN, waiting for your go
+
+**Your words (2026-11-17):** "for a proper self improving agent/partner/codemitra i feel we need to have all that helps
+it learn better and properly as well as we need to have proofs that it improved", "along with tokens used and time".
+On live projects and on personal projects from scratch, not only on a benchmark. One plan for I-31, I-32, I-33 and
+the replay set (I-35); §14 (D-082) stays the learning loop inside it.
+
+**Where we are (honest):** measured gain from learning: none yet. Every gain so far came from code fixes; no learned
+rule has been kept (§12). Checked 2026-11-17 on all 273 real session logs: ~490 turns, only 32 ran tests (8 passed,
+24 failed), 413 just "answered"; ~270 turns have no request kind; 27 verdicts (12 good, 15 bad) and 20 automatic
+signals; 0 `user_edit` records (only edits made during a session are seen). Tokens and seconds are on every turn and
+every model call (load / prompt / generation time).
+
+### A. Evidence: one task record per piece of work
+| Part | Today |
+|---|---|
+| Request, project, kind (fix / feature / from scratch / question / setup) | kind missing on most turns |
+| Snapshot at the start (git commit, else hashes of the files touched) so it can be replayed | missing |
+| Turns, tools, laptop / Kaggle | have |
+| **Tokens:** in / out per task, per model call, context used at the peak | per turn: have; per task: missing |
+| **Time:** wall time; CodeMitra's working time split into model (load / prompt / generation) and tools (tests, commands); **your time** (waiting for you, reading, answering) apart; turns to done | per turn and call: have; tool time and your time apart: missing |
+| Checks: tests before and after, the plan's "done when" checks | 32 of ~490 turns ran tests |
+| Your reactions: ✓ / ✗, rephrasing, corrections, your edits after it, also after the session (seen at the next start) | during the session only |
+| Ending + verified label (✓ done / ✗ failed / ? unverified) and the evidence that decided it | missing (I-32) |
+| Mistake tag on a failure (false "done", wrong file, skipped tests, misunderstood, looped, ...) | missing |
+| Lessons used on the task (not only the harness version) | version only |
+
+### B. Learning: how it uses the evidence (§14 inside)
+1. A failed task becomes a replay case: snapshot + request + a check that decides pass / fail.
+2. CodeMitra writes its own lesson from it (`improve`).
+3. Kept only if proven: the case passes with it and nothing else breaks in 3 runs (fair test, built 2026-11-15).
+4. The relevant lessons are used per task, and the record says which.
+5. A lesson that stops helping is retired (built).
+6. Stuck (the same mistake keeps coming back): a coach writes guidance only, never the fix (D-082).
+Later: a skill library (procedures that worked), best-of-N with tests as the judge, fine-tuning on verified successes.
+
+### C. Proof: three levels, weakest to strongest; tokens and time in each
+| Level | What | Better means |
+|---|---|---|
+| 1. Live report (describes) | per week and per version, by kind: verified success, interventions, turns to done, same mistake twice; **tokens and time per verified task** (median and total), your time per task, Kaggle GPU hours | more verified, fewer interventions and repeats, **fewer tokens and less time for the same kind of task** |
+| 2. Replay set (your real failures) | every version re-runs them: fixed since, broke again; tokens and time per case, before vs after | fixed since > 0, broke again = 0, cost not up |
+| 3. Held-out exam (I-31) | lessons on vs off, 2-3 repeats, paired per task, learning curve over rounds, frozen control | solved beyond the noise; **tokens and seconds per solved task** compared on the same tasks |
+
+**Claim rule:** "CodeMitra improved" only when levels 2 and 3 show it beyond the noise and level 1 does not contradict
+it. A gain in solved tasks that costs much more tokens or time is reported as a trade-off, not as a plain gain.
+**Against cheating:** pass / fail from running checks only; CodeMitra never sees the hidden checks; a sample of
+"wins" read by hand. Time is compared on the same machine (laptop vs Kaggle reported apart).
+
+### D. Build order (each phase: tests, then a live check; starts on your go)
+| Phase | What | Size |
+|---|---|---|
+| 1. Evidence | task records (I-32) with tokens and time per task (model / tools / your time), snapshot, edits after the session, kind, mistake tag, lessons used | 2-3 days |
+| 2. Replay set | failures → cases, in the existing fair test, with cost per case | 1-2 days |
+| 3. Proof baseline | live report (I-33) + held-out exam generation 0 (I-31), both with tokens and time | 1-2 days + Kaggle hours |
+| 4. Learning rounds | generations 1, 2, 3 ... with the curve; coach only when stuck | ongoing |

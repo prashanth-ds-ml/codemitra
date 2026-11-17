@@ -214,6 +214,7 @@ New ideas land here first, with a one-line impact guess. They move into PLAN.md 
   for "done", check again, continue; still failing → Kaggle may need time. A `/kaggle start` that hits no internet
   runs the same guide. Later: the chat answers setup questions from docs/guide + the live checklist. Unproven: the
   CPU-only probe (push with no accelerator + internet on). ~0.5 day + tests. Impact: high (every new user hits it).
+- **I-35 Replay set from real failures** (2026-11-17): a failed task (I-32) becomes a frozen case (snapshot + request + check); every version re-runs them: fixed since, broke again, tokens and time per case. One plan with I-31, I-32, I-33: [SELF_IMPROVEMENT.md §15](SELF_IMPROVEMENT.md) (evidence → learning → proof, with tokens and time in every level). Waiting for the user's go.
 
 ## Later (not milestones)
 Data pack, CodeMitra as an MCP server, debug-brief experiment, escalation ladder,
