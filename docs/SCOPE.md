@@ -215,6 +215,22 @@ New ideas land here first, with a one-line impact guess. They move into PLAN.md 
   runs the same guide. Later: the chat answers setup questions from docs/guide + the live checklist. Unproven: the
   CPU-only probe (push with no accelerator + internet on). ~0.5 day + tests. Impact: high (every new user hits it).
 - **I-35 Replay set from real failures** (2026-11-17): a failed task (I-32) becomes a frozen case (snapshot + request + check); every version re-runs them: fixed since, broke again, tokens and time per case. One plan with I-31, I-32, I-33: [SELF_IMPROVEMENT.md §15](SELF_IMPROVEMENT.md) (evidence → learning → proof, with tokens and time in every level). Waiting for the user's go.
+- **I-36 Document skills: Excel, PDF, Word** (user, 2026-11-17: "lets add excel, pdf, doc making skill to
+  codemitra"). Today none of the three exist: the 23 skills in `skills/` are coding playbooks; `pdf-ingestion` only
+  reads PDFs, `markdown` only writes .md; `~/.codemitra/skills` is empty. Also: `skills/` is not in the wheel and is
+  found only when the workspace has a `skills/` folder, so in a user's own project CodeMitra sees no repo skills.
+  What: three short SKILL.md (`xlsx`, `pdf`, `docx`) for a 4-9B model: step by step, one library each (openpyxl,
+  reportlab, python-docx), one small example script, and a last step that opens the produced file and checks it
+  (sheet names + cell values, page count + text via pypdf, paragraphs + headings). Libraries go in with `pip
+  install`, which E-128 already runs as the project's Python (or a new `.venv`). Claude's own skills: `skills import
+  claude` does not find them (they sit in `~/.claude/skills/synced/<id>/<name>`, three levels down; import looks two
+  down) and they do not fit: written for Claude (8-10K chars each, docx uses Node docx-js, xlsx needs LibreOffice for
+  formula recalculation); Apache-2.0, so ideas can be borrowed with attribution, but ours are written fresh. Ship:
+  as built-in skills (bundled, or copied to `~/.codemitra/skills` by setup), else nobody outside this repo sees them.
+  Prompt cost: one index line each, but the index is capped at 800 chars and already ends in "… N more" with 23
+  skills, so these three must be listed first or matched by request. Test: 3 practice tasks per format through the
+  chat with a hidden check that opens the file; unit tests for the bundling. ~1 day. Impact: medium (a common
+  non-coding ask from friends; first skills that make files, not code). Waiting for the user's go.
 
 ## Later (not milestones)
 Data pack, CodeMitra as an MCP server, debug-brief experiment, escalation ladder,
