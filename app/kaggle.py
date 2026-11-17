@@ -703,7 +703,7 @@ def checklist(api=None, *, probe: bool = False, echo=print, sleep=time.sleep, ap
         return steps
 
     if api is None:
-        if not has_key():
+        if api_factory is None and not has_key():  # E-140: a given factory is the key (tests, the wizard's fakes)
             s["account"].update(detail="sign up free if you have none (Google or email)", url=SIGNUP_URL)
             return key_problem("no key on this machine yet")
         try:
