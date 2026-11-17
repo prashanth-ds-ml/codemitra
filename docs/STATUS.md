@@ -1,7 +1,10 @@
 # Status
 
+**2026-11-17: v0.8.7 PUBLISHED** (pushed 6d40421, CI green on Windows + Linux, tag v0.8.7 + pre-release, reply
+posted on #13). Items 1-2 below are done; saran now verifies his phone and runs `codemitra update`.
+
 **SESSION CLOSED 2026-11-16.** Handoff for the next session:
-1. **v0.8.7 is committed locally, NOT pushed** (099071b E-137 Kaggle internet check + account named; efe8bfb E-138
+1. **(done 2026-11-17)** **v0.8.7 is committed locally, NOT pushed** (099071b E-137 Kaggle internet check + account named; efe8bfb E-138
    prompt budget fix for CI, L-054/L-055; plus this docs commit). Release check shown; 1,260 tests pass. On the
    user's OK: push main → wait for CI green (L-054; v0.8.6's CI was red on the prompt budget, fixed by E-138) → tag
    v0.8.7 + GitHub pre-release → post the drafted reply on #13 (root cause: saran's Kaggle notebook has no internet,
