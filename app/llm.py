@@ -61,6 +61,28 @@ def stream_timeout():
     return httpx.Timeout(STREAM_STALL_S, connect=CONNECT_S)
 
 
+STALL_MAX_S = 1200
+
+
+def stall_for(tokens_per_s: float | None) -> int:
+    """E-141: how long a laptop call may send nothing. Ollama sends a tool call only when it is complete, so a whole
+    file in one call is silent until done: allow the longest reply (MAX_OUTPUT_TOKENS) at this machine's measured
+    speed, with a margin; never less than STREAM_STALL_S, never more than STALL_MAX_S. Unknown speed: STREAM_STALL_S."""
+    if not tokens_per_s or tokens_per_s <= 0:
+        return STREAM_STALL_S
+    return int(min(STALL_MAX_S, max(STREAM_STALL_S, 1.3 * MAX_OUTPUT_TOKENS / tokens_per_s)))
+
+
+def set_stall(llm, seconds: float) -> bool:
+    """Change the read timeout of an existing ChatOllama's HTTP client (it is fixed when the client is made)."""
+    import httpx
+    try:
+        llm._client._client.timeout = httpx.Timeout(seconds, connect=CONNECT_S)
+        return True
+    except AttributeError:
+        return False
+
+
 def is_stalled(exc: BaseException) -> bool:
     """The model sent nothing for STREAM_STALL_S (httpx's read timeout), not a broken connection."""
     return type(exc).__name__ in ("ReadTimeout", "TimeoutException")

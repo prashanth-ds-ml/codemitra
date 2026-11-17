@@ -14,9 +14,12 @@ notebook can stop by itself when CodeMitra has not used it for a while.
 from __future__ import annotations
 
 import hmac
+import json
 import http.client
 import os
+import queue
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -25,6 +28,40 @@ SEARCH_UPSTREAM = "127.0.0.1:8888"  # SearXNG, started by the notebook (must-hav
 
 HOP = {"connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-authorization",
        "proxy-authenticate", "host", "content-length"}
+
+
+KEEPALIVE_S = 30  # E-141: well under Cloudflare's ~100 s and CodeMitra's 300 s read timeout
+
+
+def streamed_chat(command: str, tail: str, body: bytes | None) -> str | None:
+    """The model name when this is a streamed POST /api/chat (Ollama streams unless "stream": false), else None."""
+    if command != "POST" or tail.split("?")[0] != "/api/chat" or not body:
+        return None
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or data.get("stream") is False:
+        return None
+    return str(data.get("model") or "")
+
+
+def keepalive_line(model: str) -> bytes:
+    """An empty assistant chunk: Ollama's client parses it, it adds no text, and it is not the last one."""
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return (json.dumps({"model": model, "created_at": now, "message": {"role": "assistant", "content": ""},
+                        "done": False}) + "\n").encode()
+
+
+def error_line(status: int, raw: bytes) -> bytes:
+    """Ollama's own {"error": ...} when it sent one, else the status; one line, so the client raises it."""
+    try:
+        data = json.loads(raw or b"{}")
+        msg = data.get("error") if isinstance(data, dict) else None
+    except ValueError:
+        msg = None
+    text = msg or (raw.decode("utf-8", "replace").strip()[:300] or f"ollama answered {status}")
+    return (json.dumps({"error": text}) + "\n").encode()
 
 
 def _touch(path: str) -> None:
@@ -43,6 +80,12 @@ def make_handler(token: str, upstream: str, state_dir: str | None = None, search
 
         def log_message(self, fmt, *args):  # keep the notebook quiet; the token must not appear in logs
             pass
+
+        def handle(self) -> None:  # a client that hangs up on a kept-open connection is normal, not an error
+            try:
+                super().handle()
+            except ConnectionError:
+                pass
 
         def _refuse(self) -> None:
             self.send_response(404)
@@ -71,6 +114,10 @@ def make_handler(token: str, upstream: str, state_dir: str | None = None, search
             if state_dir is not None and tail.split("?")[0] not in QUIET:
                 _touch(os.path.join(state_dir, "last_request"))
             headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
+            model = streamed_chat(self.command, tail, body)
+            if model is not None:  # E-141: keep the tunnel open while a long tool call is being written
+                self._forward_chat(headers, tail, body, model)
+                return
             if tail.split("?")[0] == "/search":  # must-have 10: web search by SearXNG on this machine
                 conn = http.client.HTTPConnection(s_host, int(s_port or 8888), timeout=60)
             else:
@@ -104,6 +151,60 @@ def make_handler(token: str, upstream: str, state_dir: str | None = None, search
                     pass
             finally:
                 conn.close()
+
+        def _chunk(self, data: bytes) -> None:
+            self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
+            self.wfile.flush()
+
+        def _forward_chat(self, headers: dict, tail: str, body: bytes, model: str) -> None:
+            """E-141: a streamed /api/chat. Ollama sends a tool call only when it is complete and sends no headers until
+            its first chunk, so a whole file written as one tool call was silent for minutes and Cloudflare's tunnel
+            closed it (524 after ~100 s). Headers go out at once, then an empty chunk every KEEPALIVE_S while Ollama is
+            silent; an upstream failure arrives as an {"error": ...} line, which Ollama's client raises."""
+            q: queue.Queue = queue.Queue()
+
+            def pump() -> None:
+                conn = http.client.HTTPConnection(host, port_n, timeout=3600)
+                try:
+                    conn.request(self.command, tail, body=body, headers=headers)
+                    resp = conn.getresponse()
+                    if resp.status != 200:
+                        q.put(("error", error_line(resp.status, resp.read())))
+                        return
+                    while True:
+                        data = resp.read1(65536)
+                        if not data:
+                            break
+                        q.put(("data", data))
+                except (ConnectionError, OSError) as exc:
+                    q.put(("error", error_line(502, f"proxy: {type(exc).__name__}".encode())))
+                finally:
+                    conn.close()
+                    q.put(("end", b""))
+
+            threading.Thread(target=pump, daemon=True).start()
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson")
+                self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
+                self.wfile.flush()
+                at_line_start = True
+                while True:
+                    try:
+                        kind, data = q.get(timeout=KEEPALIVE_S)
+                    except queue.Empty:
+                        if at_line_start:
+                            self._chunk(keepalive_line(model))
+                        continue
+                    if kind == "end":
+                        break
+                    self._chunk(data)
+                    at_line_start = data.endswith(b"\n")
+                self.wfile.write(b"0\r\n\r\n")
+                self.wfile.flush()
+            except OSError:
+                pass  # CodeMitra went away; the pump thread ends with Ollama's reply
 
         do_GET = do_POST = do_DELETE = do_PUT = _forward
 

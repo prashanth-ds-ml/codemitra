@@ -29,8 +29,8 @@ def test_a_stalled_laptop_model_stops_the_turn_and_says_why(tmp_path):
     s = _session(tmp_path, m)
     s.backend_kind = "laptop"
     res = s.turn(_msgs("explain the code"))
-    assert res.stopped and "sent nothing for 5 min" in res.stop_reason and "/free" in res.stop_reason
-    assert len(m.heard) == 1                                   # no wrap-up call into the same stuck model
+    assert res.stopped and "sent nothing for 5 min twice" in res.stop_reason and "/free" in res.stop_reason
+    assert len(m.heard) == 2          # E-141: one retry asking for smaller parts, then no wrap-up into a stuck model
     assert any(r["kind"] == "model_error" and r.get("stalled") for r in _rows(s))
 
 

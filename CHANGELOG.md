@@ -4,6 +4,20 @@ All notable changes, newest first. Versions follow the milestones in [docs/PLAN.
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-11-17 · Long files no longer stop the turn
+- **A long file no longer looks like a stuck model (E-141):** asked to save a long analysis as a markdown file, the
+  model writes the whole file as one tool call, and Ollama sends a tool call only when it is complete. On a slow
+  laptop that was silent for over 5 minutes and CodeMitra stopped with "Ollama may be stuck"; on Kaggle the tunnel
+  cut it after about 100 s. Both are fixed:
+  - **Kaggle:** the notebook's proxy answers at once and sends an empty chunk every 30 s while the model writes, so
+    the tunnel stays open (checked live: a 297-line file in one 82 s call, through the proxy, with a 60 s timeout).
+  - **Laptop:** how long a call may stay silent now follows this machine's measured speed (time for the longest
+    reply, 5 to 20 minutes) instead of a flat 5 minutes.
+  - A call that is still silent after that gets one retry asking for the file in parts; a second one stops with the
+    likely cause first ("one step was too long for this machine").
+- **Long files in parts:** the change phase and the tools say to write a long file ~60 lines at a time
+  (`write_file`, then `append_file`); the old advice (~150 lines) was itself too long for a slow laptop.
+
 ## [0.8.8] - 2026-11-17 · Kaggle setup checklist: what is done, what is left
 - **One checklist for Kaggle, checked live (I-34, issue #13):** account, API key, phone verified (notebook internet),
   GPU hours, first GPU run. Steps already done show as done (✓ and what was found), the first open one says what to

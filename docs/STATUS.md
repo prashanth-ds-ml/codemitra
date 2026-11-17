@@ -1,5 +1,7 @@
 # Status
 
+**2026-11-17, evening: v0.8.9** (E-141/F-133): long files written as one silent tool call no longer stop the turn (Kaggle proxy keep-alives, laptop stall limit from measured speed, retry in parts). The notebook changed: a running Kaggle session keeps the old proxy until its next `kaggle start`. Open: SCOPE I-36 document skills + the two skill bugs it found (repo skills not shipped to users' projects; skill index cut at 800 chars) await the user's go; §15 plan awaits go; MongoDB vs other + Vercel vs Worker undecided.
+
 **2026-11-17, later: v0.8.8 PUBLISHED** (714b869, CI green after E-140/F-132: 2 guide tests needed a real key; tag v0.8.8 + pre-release). User messages saran directly (no #13 comment posted).
 Kaggle setup checklist (account, key, phone = notebook internet, GPU hours, first run; done steps shown ✓), `codemitra
 kaggle check` / `/kaggle check` with a CPU-only internet probe (live on our account: 22-25 s, no GPU hours; internet-off

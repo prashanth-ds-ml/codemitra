@@ -770,7 +770,7 @@ TOOL_SPECS = [
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"},
                                                      "new": {"type": "string"}}, "required": ["path", "old", "new"]}},
     {"name": "append_file", "description": "Add content to the end of a file you wrote or read. Long files: "
-     "write_file the first ~150 lines, then append_file the rest.",
+     "write_file the first ~60 lines, then append_file the rest.",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
                     "required": ["path", "content"]}},
     {"name": "check_code", "description": "Find Python errors that crash at run time (undefined names, unbound "

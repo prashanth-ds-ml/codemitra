@@ -24,7 +24,8 @@ from app.core import loop as core_loop
 from app.core import signals as SIG
 from app.core import tools as T
 from app.core.parse import for_model, text_tool_calls
-from app.llm import STREAM_STALL_S, is_stalled
+from app.core import runinfo
+from app.llm import STREAM_STALL_S, is_stalled, set_stall, stall_for
 
 CHAT_PROMPT = """You are CodeMitra, a local coding assistant working in the user's project folder.
 
@@ -317,8 +318,10 @@ PHASES = {
                          "link for each point). Say plainly when the search found nothing useful.]"),
     "make_change": dict(tools=None, budget="chat_max_steps",
                         note="[CodeMitra: change phase. Read the file before you edit it, make small changes, run the "
-                             "tests right after, fix what fails, stop when it works. Then tell the user in two or "
-                             "three lines what you changed (path:line) and the test result.]"),
+                             "tests right after, fix what fails, stop when it works. A long new file (a document, "
+                             "over ~60 lines): write_file the first ~60 lines, then append_file the rest, ~60 lines "
+                             "per call, so no single step runs for minutes. Then tell the user in two or three lines "
+                             "what you changed (path:line) and the test result.]"),
     "propose_plan": dict(tools=(), budget=None,
                          note="[CodeMitra: plan phase. Write a short plan: the goal in one line, then 3-6 steps, each with "
                               "the files it touches and how it is checked. End by asking the user whether to build "
@@ -526,8 +529,13 @@ def is_remote_slow(exc: BaseException) -> bool:
 
 
 SLOW_NOTE = ("[CodeMitra: your last step took too long and was cut off before it reached the user. Do the same work in "
-             "smaller steps: write long files in parts (write_file with the first ~150 lines, then append_file), "
-             "and edit one block at a time.]")
+             "smaller steps: write long files in parts (write_file with the first ~60 lines, then append_file the "
+             "rest, ~60 lines per call), and edit one block at a time.]")
+# E-141 (live 2026-11-17): a whole document written in ONE tool call sent nothing for 5 min on the laptop (Ollama sends
+# a tool call only when it is complete; 9B partly on the CPU at 8.5 tokens/s) and the turn stopped as "Ollama stuck"
+STALL_STOP = ("the model sent nothing for {min} min twice. Usually one step was too long for this machine (a whole file "
+              "at once): ask for it in parts, e.g. \"write the first section, then add the rest\". If it happens on "
+              "short replies too, Ollama may be stuck or out of memory: `/free`, or restart Ollama")
 
 
 def is_remote_down(exc: BaseException) -> bool:
@@ -538,7 +546,7 @@ def is_remote_down(exc: BaseException) -> bool:
     status = getattr(exc, "status_code", None)
     return status in (502, 503, 504, 530) or any(s in text for s in (
         "getaddrinfo", "name or service not known", "nodename nor servname", "trycloudflare", "error 1033",
-        "connecterror", "timed out"))
+        "connecterror", "timed out", "proxy: "))  # E-141: the Kaggle proxy lost Ollama
 
 
 def wait_for_ollama(base_url: str | None = None, timeout_s: float = 90, poll_s: float = 3) -> bool:
@@ -689,6 +697,8 @@ class ChatSession:
                                       traces=traces)  # + full model calls for the fine-tune (D-041)
         self.turn_no = 0
         self.backend_kind = "laptop"  # laptop | remote: a remote that drops raises RemoteGone (D-062)
+        self.gen_tps: float | None = None  # E-141: this machine's measured writing speed (tokens/s), last call
+        self.stall_s = STREAM_STALL_S      # E-141: how long a laptop call may send nothing, from that speed
         self.turn_log: list[dict] = []  # {no, user, outcome, files}: the facts for the Kaggle-ended report
         self._plans_run: dict = {}  # (plan path, text hash) -> result, reset every turn (E-050)
         self._last_user = ""  # start of the last turn's message, named when you mark it (E-052)
@@ -1414,6 +1424,9 @@ class ChatSession:
             last = self.answer_on_last_step and step == max_steps and step > 1
             if last:  # D-068 step 2: no tools on the last step, so the turn ends with an answer
                 messages.append(HumanMessage(content=self.last_step_note))
+            if self.backend_kind != "remote":  # E-141: a long silent tool call is normal at this machine's speed
+                self.stall_s = stall_for(self.gen_tps)
+                set_stall(self.llm, self.stall_s)
             try:
                 chunks = (self.llm if last else bound).stream(for_model(messages))
                 streamed = self._stream(chunks if self.thinking else guard_runaway(chunks), step)
@@ -1452,11 +1465,16 @@ class ChatSession:
                         continue
                     raise RemoteGone(str(exc)[:300]) from exc
                 if self.backend_kind != "remote" and is_stalled(exc):  # E-081: no byte for 5 min; never wait forever
-                    self.rec.write("model_error", turn=self.turn_no, step=step, error=str(exc)[:500], stalled=True)
+                    self.rec.write("model_error", turn=self.turn_no, step=step, error=str(exc)[:500], stalled=True,
+                                   retry=not slow_retried)
+                    if not slow_retried:  # E-141: most often one huge silent tool call (a whole file): smaller steps
+                        slow_retried = True
+                        self.hooks.show("retry", {}, f"the model wrote for {self.stall_s // 60} min without finishing "
+                                        "one step (a whole file at once?); asking for it in smaller parts", False)
+                        messages.append(HumanMessage(content=SLOW_NOTE))
+                        continue
                     res.stopped = True
-                    res.stop_reason = (f"the model sent nothing for {STREAM_STALL_S // 60} min, so CodeMitra stopped "
-                                       "waiting (Ollama may be stuck or out of memory: `/free`, or restart Ollama, then "
-                                       "send it again)")
+                    res.stop_reason = STALL_STOP.format(min=self.stall_s // 60)
                     return res
                 if is_connection_error(exc) and not conn_retried:  # Ollama restarted (E-047): wait, retry once
                     conn_retried = True
@@ -1476,6 +1494,9 @@ class ChatSession:
                 messages.append(HumanMessage(content=BAD_TOOL_CALL_NOTE.format(error=exc)))
                 continue
             self._trace(messages, streamed, specs, step)
+            timing = runinfo.ollama_timings(getattr(streamed, "message", None))
+            if timing.get("gen_tokens", 0) >= 20 and timing.get("gen_s"):  # E-141: speed for the next stall limit
+                self.gen_tps = timing["gen_tokens"] / timing["gen_s"]
             if step == 1:
                 res.first_s = getattr(streamed, "first_s", None)
             if streamed.stopped:
