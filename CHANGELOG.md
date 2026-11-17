@@ -4,6 +4,17 @@ All notable changes, newest first. Versions follow the milestones in [docs/PLAN.
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-11-17 · Kaggle setup checklist: what is done, what is left
+- **One checklist for Kaggle, checked live (I-34, issue #13):** account, API key, phone verified (notebook internet),
+  GPU hours, first GPU run. Steps already done show as done (✓ and what was found), the first open one says what to
+  do. Shown by `codemitra setup`, `codemitra kaggle setup`, `codemitra kaggle status` and `/kaggle`.
+- **`codemitra kaggle check` / `/kaggle check`:** checks the phone step with a small CPU-only notebook (about 30 s,
+  no GPU hours) and walks you through it: offers to open Kaggle's settings page, waits for "done", checks again.
+- **No GPU run without internet:** `kaggle start` runs that check first (once; remembered after it passes), so an
+  account without a verified phone never starts a GPU notebook that can only time out. `/kaggle start` that finds no
+  internet walks you through the fix and starts again.
+- **Setup with a key already on the machine checks the phone too** (it said "signed in" and stopped: issue #13).
+
 ## [0.8.7] - 2026-11-16 · Kaggle: which account, and does it have internet
 - **No internet on Kaggle is found in seconds and named (E-137, issue #13):** the notebook checks its internet before
   installing anything; without it the run ends at once with "Kaggle account <name>: its notebooks get no internet ...

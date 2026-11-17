@@ -160,7 +160,9 @@ def test_kaggle_without_an_account_guides_opens_the_page_and_takes_the_token(mon
     monkeypatch.setenv("KAGGLE_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(K, "token_path", lambda: tmp_path / "access_token")
     got = []
-    monkeypatch.setattr(K, "setup", lambda token, echo=print, api_factory=None: got.append(token) or token == "KGAT_x")
+    monkeypatch.setattr(K, "setup", lambda token, echo=print, api_factory=None, next_hint=True:
+                        got.append(token) or token == "KGAT_x")
+    monkeypatch.setattr(K, "guide", lambda **kw: True)  # I-34: the checklist after sign-in has its own tests
     f = Fake(answers=["y", "y", "wrong", "KGAT_x"])
     r = W.step_kaggle(f.io(), M8, auto=False)
     assert r.ok and got == ["wrong", "KGAT_x"] and f.opened == [W.KAGGLE_SETTINGS]

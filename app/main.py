@@ -423,7 +423,8 @@ def _kaggle_model() -> str:
 
 
 def cmd_kaggle(
-    action: str = typer.Argument("status", help="setup [token|path] | start | stop | status | use <now|when-needed|never>"),
+    action: str = typer.Argument("status", help="setup [token|path] | check | start | stop | status | "
+                                                "use <now|when-needed|never>"),
     path: str = typer.Argument("", help="For setup: the downloaded kaggle.json (default: look in Downloads)."),
     model: str = typer.Option("", "--model", help="Model to run there (default: your chat model)."),
     ctx: int = typer.Option(262_144, "--ctx", help="Context (default 256K, the model's maximum)."),
@@ -433,9 +434,23 @@ def cmd_kaggle(
     """Use your Kaggle GPU hours from CodeMitra: start a private GPU notebook, stop it, see hours left (D-061)."""
     from app import kaggle
 
+    def walk() -> bool:  # I-34: the setup checklist, the first open step guided (asks only in a terminal)
+        if sys.stdin.isatty():
+            import webbrowser
+            return kaggle.guide(echo=console.print, ask=lambda q: console.input(q), open_url=webbrowser.open)
+        steps = kaggle.checklist(probe=True, echo=console.print)
+        for line in kaggle.render(steps):
+            console.print(line)
+        return kaggle.first_open(steps) is None
+
     try:
         if action == "setup":
-            if not kaggle.setup(path, echo=console.print):
+            if not kaggle.setup(path, echo=console.print, next_hint=False):
+                raise typer.Exit(1)
+            if not walk():
+                raise typer.Exit(1)
+        elif action == "check":
+            if not walk():
                 raise typer.Exit(1)
         elif action == "use":  # D-064: when CodeMitra uses Kaggle
             from app import backend
@@ -445,7 +460,13 @@ def cmd_kaggle(
             backend.save_prefs(kaggle_use=path, onboarded=True)
             console.print(f"☁ Kaggle {backend.USE_TEXT[path]}")
         elif action == "start":
-            kaggle.start(model or _kaggle_model(), ctx, idle_min=idle, max_hours=hours, echo=console.print)
+            try:
+                kaggle.start(model or _kaggle_model(), ctx, idle_min=idle, max_hours=hours, echo=console.print)
+            except kaggle.NoInternet as exc:  # I-34: walk through the fix, then start again
+                console.print(f"✗ {exc}")
+                if not (sys.stdin.isatty() and walk()):
+                    raise typer.Exit(1)
+                kaggle.start(model or _kaggle_model(), ctx, idle_min=idle, max_hours=hours, echo=console.print)
             console.print("  Start CodeMitra (or restart it): it now runs on Kaggle. `codemitra kaggle stop` when done.")
         elif action == "stop":
             kaggle.stop(echo=console.print)
@@ -948,7 +969,7 @@ _COMMAND_HELP = [
         ("/status",        "Workspace, model, mode and session status"),
         ("/doctor",        "Machine and setup check: RAM, GPU, Ollama, permissions, MCP"),
         ("/free",          "Make RAM room for the model: tick programs, CodeMitra closes them"),
-        ("/kaggle [start|stop|use|setup]", "Kaggle GPU: status and hours · start/stop · use now|when-needed|never"),
+        ("/kaggle [start|stop|use|setup|check]", "Kaggle GPU: setup checklist and hours · start/stop · use now|when-needed|never"),
         ("/report",        "Rebuild the dashboard (sessions, tools, improvement, training data) and open it"),
         ("/role [name]",   "Show roles, or switch role: model, tools and MCP servers at once"),
         ("/model use <m>", "Switch the chat model now (no restart)"),
@@ -3296,7 +3317,8 @@ def _chat():
                 health.check()
             except Exception as exc:  # noqa: BLE001 - reported before the next turn
                 health.s.state, health.s.stage = "none", ""
-                bsession.notes.append(f"Kaggle did not start: {exc}")
+                hint = " · `/kaggle check` walks you through it" if isinstance(exc, kaggle_mod.NoInternet) else ""
+                bsession.notes.append(f"Kaggle did not start: {exc}{hint}")
 
         _threading.Thread(target=run, daemon=True, name="codemitra-kaggle-start").start()
         console.print(Text("  ☁ starting Kaggle in the background (4-8 min): keep working; the status line shows "
@@ -3341,7 +3363,7 @@ def _chat():
             token = console.input("[m.accent]  paste the token here (enter = later) ›[/m.accent] ", password=True).strip()
         except (EOFError, KeyboardInterrupt):
             token = ""
-        if token and kaggle_mod.setup(token, echo=lambda s: _say_line(str(s))):
+        if token and kaggle_mod.setup(token, echo=lambda s: _say_line(str(s)), next_hint=False):
             return True
         _say_line("later: `/kaggle setup <token>`", "m.faint")
         return False
@@ -3976,12 +3998,25 @@ def _chat():
             from app import kaggle as kaggle_mod
             from app import remote as remote_mod
             sub = (user_input.strip().split() + ["status"])[1].lower()
+
+            def _walk() -> bool:  # I-34: the setup checklist, the first open step guided
+                import webbrowser
+                return kaggle_mod.guide(echo=lambda s: console.print(Text("  " + str(s), style="m.tool")),
+                                        ask=lambda q: console.input(f"[m.accent]{q}[/m.accent]"),
+                                        open_url=webbrowser.open)
             try:
                 if sub == "start":
                     console.print(Text("  starting a Kaggle GPU (4-8 min) · ctrl+c stops waiting, not the run",
                                        style="m.dim"))
-                    kaggle_mod.start(model, 262_144,
-                                     echo=lambda s: console.print(Text(str(s), style="m.tool")))
+                    try:
+                        kaggle_mod.start(model, 262_144,
+                                         echo=lambda s: console.print(Text(str(s), style="m.tool")))
+                    except kaggle_mod.NoInternet as exc:  # I-34: walk through the fix, then start again
+                        console.print(Text(f"  ✗ {exc}", style="m.err"))
+                        if not _walk():
+                            continue
+                        kaggle_mod.start(model, 262_144,
+                                         echo=lambda s: console.print(Text(str(s), style="m.tool")))
                     health.check()
                     _want = backend_mod.route(session_mode, chat.role)
                     if _want == backend_mod.REMOTE:
@@ -4005,7 +4040,10 @@ def _chat():
                         if value == "now" and health.s.state not in ("up", "starting") and _has_kaggle_key():
                             _start_kaggle_background()
                 elif sub == "setup":
-                    _guide_setup()
+                    if _guide_setup():
+                        _walk()
+                elif sub == "check":
+                    _walk()
                 else:
                     use = backend_mod.kaggle_use()
                     console.print(Text(f"  setting: {use or 'not decided yet'} · "

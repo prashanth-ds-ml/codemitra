@@ -44,6 +44,10 @@ class KaggleError(Exception):
     """A problem the user can fix; the message says how."""
 
 
+class NoInternet(KaggleError):
+    """This account's notebooks get no internet (phone not verified): the guide can walk the user through it (I-34)."""
+
+
 def _home() -> Path:
     from app import config
     return config._codemitra_home()
@@ -130,7 +134,7 @@ def find_download() -> Path | None:
     return found[0] if found else None
 
 
-def setup(source: str = "", *, echo=print, api_factory=None) -> bool:
+def setup(source: str = "", *, echo=print, api_factory=None, next_hint: bool = True) -> bool:
     """`codemitra kaggle setup [path]`: put the downloaded API key where Kaggle looks, check it, show the hours.
     Any Kaggle account; the key stays on this machine."""
     import shutil
@@ -190,9 +194,11 @@ def setup(source: str = "", *, echo=print, api_factory=None) -> bool:
     echo(f"✓ signed in to Kaggle as {user} (key: {key_source()}) · " + quota_line(q))
     if not q.get("total_h"):
         echo("⚠ no GPU hours shown: verify your phone on kaggle.com → Settings (GPU and internet need it)")
-    else:  # E-137: hours are shown before the phone is verified too; notebooks get internet only after it
+    if not next_hint:  # I-34: the caller runs the setup checklist next (it checks the phone itself)
+        return True
+    if q.get("total_h"):  # E-137: hours are shown before the phone is verified too; notebooks get internet only after it
         echo("  Phone verified? Kaggle gives notebooks internet only then (kaggle.com → Settings → Phone "
-             "verification); the first `codemitra kaggle start` checks it.")
+             "verification); `codemitra kaggle check` checks it in about a minute, no GPU hours.")
     echo("Next: `codemitra kaggle start` (4-8 minutes), then `codemitra` in any project folder. `codemitra kaggle stop` when done.")
     return True
 
@@ -377,6 +383,10 @@ def start(model: str, ctx: int = 262_144, *, idle_min: int = 30, max_hours: floa
     if q["total_h"] and q["left_h"] < 0.25:
         raise KaggleError("Less than 15 minutes of GPU time left this week: " + quota_line(q))
     hours = min(max_hours, max(q["left_h"], 0.25) if q["total_h"] else max_hours)
+    if internet_known(user) is not True:  # I-34: a GPU run without internet only times out; check first, no GPU hours
+        ok, detail = check_internet(api, user, echo=echo, sleep=sleep)
+        if ok is False:
+            raise NoInternet(NO_INTERNET.format(user=user) + f" (checked just now: {detail})")
     token = secrets.token_urlsafe(24)
     folder = notebook_folder(model, ctx, token, idle_min, user)
     echo(f"  uploading a private notebook ({ACCELERATOR}, {model} at {ctx // 1024}K, stops after {idle_min} min "
@@ -392,7 +402,7 @@ def start(model: str, ctx: int = 262_144, *, idle_min: int = 30, max_hours: floa
     save_state(state)
     if granted(api, ref).get("enable_internet") is False:  # E-137: Kaggle saved it without internet: say so now
         _remember_internet(user, False)
-        raise KaggleError(NO_INTERNET.format(user=user) + " (Kaggle saved this notebook with internet off; the run "
+        raise NoInternet(NO_INTERNET.format(user=user) + " (Kaggle saved this notebook with internet off; the run "
                           "ends by itself within a minute of starting.)")
     return _follow(api, ref, state, ctx, wait_min, echo, sleep)
 
@@ -458,7 +468,7 @@ def _follow(api, ref: str, state: dict, ctx: int, wait_min: float, echo, sleep, 
                     stop.set()
                     detail = fields.get("detail", "?")
                     if detail.startswith("no internet"):
-                        raise KaggleError(NO_INTERNET.format(user=ref.split("/")[0]) + f" (the notebook: {detail}.) "
+                        raise NoInternet(NO_INTERNET.format(user=ref.split("/")[0]) + f" (the notebook: {detail}.) "
                                           f"Log: {state.get('url')}")
                     raise KaggleError(f"The notebook failed: {detail}. Log: {state.get('url')}")
                 if stage == "search":  # must-have 10: SearXNG on the notebook passed its engine test, or not
@@ -547,7 +557,8 @@ def status(*, echo=print, api=None) -> None:
     r = remote.active()
     try:
         api = api or client()
-        echo(account_line(username(api)))  # E-137: which account, which key
+        for line in render(checklist(api=api)):  # I-34: every setup step, the done ones shown as done
+            echo(line)
         if state.get("ref"):
             run, failure = run_status(api, state["ref"])
             echo(f"Kaggle run: {run.lower()}{' · ' + failure if failure else ''} · {state.get('model', '?')} at "
@@ -556,9 +567,6 @@ def status(*, echo=print, api=None) -> None:
                 # E-135: a run nobody is following never gets used; say how to connect to it
                 echo("  not connected to this run yet: `codemitra kaggle start` follows it and switches CodeMitra "
                      "to it when it is ready")
-        else:
-            echo("Kaggle run: none started from CodeMitra yet (`codemitra kaggle start`)")
-        echo(quota_line(quota(api)))
     except KaggleError as exc:
         echo(f"Kaggle: {exc}")
     if r:
@@ -602,3 +610,203 @@ def readiness(api_factory=None) -> dict:
     else:
         out["ok"] = True
     return out
+
+
+# ── I-34: the setup checklist (issue #13: a key, GPU hours and still no internet, found out only after a GPU start) ─
+NET_SLUG = "codemitra-net-check"
+NET_WAIT_S = 300
+SIGNUP_URL = "https://www.kaggle.com/account/login?phase=startRegisterTab"
+SETTINGS_URL = "https://www.kaggle.com/settings"
+PHONE_FIX = "kaggle.com → your picture → Settings → Phone verification (Kaggle turns notebook internet on after it)"
+KEY_FIX = "kaggle.com → your picture → Settings → API → Generate New Token, copy it, then `codemitra kaggle setup <token>`"
+NET_SCRIPT = (
+    "# CodeMitra's internet check (I-34): CPU only, no GPU hours. It only tries to reach ollama.com.\n"
+    "import subprocess\n"
+    "try:\n"
+    "    r = subprocess.run(['curl', '-sS', '-o', '/dev/null', '--max-time', '20', 'https://ollama.com'],\n"
+    "                       capture_output=True, text=True, timeout=40)\n"
+    "    p = '' if r.returncode == 0 else (r.stderr.strip() or f'curl exit {r.returncode}')\n"
+    "except Exception as exc:\n"
+    "    p = f'{type(exc).__name__}: {exc}'\n"
+    "p = p[-160:].replace('|', '/').replace('\\n', ' ')\n"
+    "print(f'MITRA|net|ok={not p}|detail={p}', flush=True)\n")
+
+
+def internet_known(user: str) -> bool | None:
+    """What the last check said about this account's notebook internet (None: never checked)."""
+    from app import backend
+    net = backend.prefs().get("kaggle_internet") or {}
+    if isinstance(net, dict) and net.get("user") == user and "ok" in net:
+        return bool(net["ok"])
+    return None
+
+
+def check_internet(api, user: str, *, echo=print, sleep=time.sleep, clock=time.time,
+                   wait_s: int = NET_WAIT_S) -> tuple[bool | None, str]:
+    """Do this account's notebooks get internet? A tiny CPU-only script that only tries ollama.com: no GPU hours,
+    25 s with internet and 46 s without in the live check on 2026-11-17 (the second gave issue #13's exact error).
+    (True/False, detail), remembered for the account; (None, why) when it could not tell."""
+    import shutil
+    folder = _home() / "kaggle-net"
+    shutil.rmtree(folder, ignore_errors=True)
+    ref = f"{user}/{NET_SLUG}"
+    echo("  checking that this account's notebooks get internet (a small CPU notebook, about 1 min, no GPU hours) …")
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "check.py").write_text(NET_SCRIPT, encoding="utf-8")
+        meta = {"id": ref, "title": NET_SLUG, "code_file": "check.py", "language": "python", "kernel_type": "script",
+                "is_private": True, "enable_gpu": False, "enable_internet": True, "dataset_sources": [],
+                "competition_sources": [], "kernel_sources": [], "model_sources": []}
+        (folder / "kernel-metadata.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+        resp = _timed(lambda: api.kernels_push(str(folder), timeout=str(wait_s)), timeout=120)
+        err = str(getattr(resp, "error", "") or "")
+        if err:
+            return None, f"Kaggle refused the check: {err}"
+        deadline, status = clock() + wait_s, "UNKNOWN"
+        while clock() < deadline:
+            status, _ = run_status(api, ref)
+            if status not in ("QUEUED", "RUNNING", "UNKNOWN"):
+                break
+            sleep(5)
+        else:
+            return None, f"the check did not finish in {wait_s // 60} min ({status.lower()})"
+        out = folder / "out"
+        _timed(lambda: api.kernels_output(ref, path=str(out)), timeout=60)
+        text = "".join(p.read_text(encoding="utf-8", errors="replace") for p in out.rglob("*") if p.is_file())
+        for stage, fields in parse_stages(text):
+            if stage == "net":
+                ok = fields.get("ok") == "True"
+                _remember_internet(user, ok)
+                return ok, "internet works" if ok else (fields.get("detail") or "no internet")
+        return None, f"the check ended ({status.lower()}) without an answer"
+    except KaggleError as exc:
+        return None, str(exc)
+    except Exception as exc:  # noqa: BLE001 - a check that cannot tell is not a failure; the GPU notebook checks again
+        return None, f"{type(exc).__name__}: {exc}"[:200]
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def _step(key: str, title: str) -> dict:
+    return {"key": key, "title": title, "ok": None, "detail": "", "fix": "", "url": ""}
+
+
+def checklist(api=None, *, probe: bool = False, echo=print, sleep=time.sleep, api_factory=None) -> list[dict]:
+    """The five setup steps, each checked now: ok True (done), False (needs you: `fix`, `url`) or None (not yet / not
+    known). probe=True runs the internet check when no earlier check passed (about a minute, no GPU hours)."""
+    steps = [_step("account", "Kaggle account"), _step("key", "API key"), _step("phone", "Phone verified"),
+             _step("hours", "GPU hours"), _step("run", "First GPU run")]
+    s = {x["key"]: x for x in steps}
+
+    def key_problem(detail: str) -> list[dict]:
+        s["key"].update(ok=False, detail=detail, fix=KEY_FIX, url=SETTINGS_URL)
+        return steps
+
+    if api is None:
+        if not has_key():
+            s["account"].update(detail="sign up free if you have none (Google or email)", url=SIGNUP_URL)
+            return key_problem("no key on this machine yet")
+        try:
+            api = (api_factory or client)()
+        except KaggleError:
+            return key_problem("the key on this machine does not sign in (make a new one)")
+    try:
+        user = username(api)
+    except KaggleError:
+        return key_problem("the key does not name a Kaggle account (make a new one)")
+    s["account"].update(ok=True, detail=user)
+    s["key"].update(ok=True, detail=key_source())
+    try:
+        q = quota(api)
+    except KaggleError as exc:
+        q = None
+        s["hours"].update(detail=f"Kaggle did not answer ({exc})")
+    if q is not None:
+        if not q["total_h"]:
+            s["hours"].update(ok=False, detail="0 GPU hours shown", fix="verify your phone (step 3); the hours show after it",
+                              url=SETTINGS_URL)
+        elif q["left_h"] < 0.25:
+            s["hours"].update(ok=False, detail=quota_line(q).removeprefix("Kaggle GPU: "),
+                              fix="used up this week: CodeMitra uses this machine until the reset")
+        else:
+            s["hours"].update(ok=True, detail=quota_line(q).removeprefix("Kaggle GPU: "))
+    from app import backend
+    checked = (backend.prefs().get("kaggle_internet") or {}).get("checked", "")
+    known = internet_known(user)
+    phone = s["phone"]
+    if known is True:
+        phone.update(ok=True, detail=f"notebooks get internet (checked {checked})")
+    elif probe:
+        ok, detail = check_internet(api, user, echo=echo, sleep=sleep)
+        if ok:
+            phone.update(ok=True, detail="notebooks get internet (checked just now)")
+        elif ok is False:
+            phone.update(ok=False, detail=f"its notebooks get no internet, checked just now ({detail})", fix=PHONE_FIX,
+                         url=SETTINGS_URL)
+        else:
+            phone.update(detail=f"could not check ({detail})", fix="`codemitra kaggle check` again in a few minutes")
+    elif known is False:
+        phone.update(ok=False, detail=f"its notebooks got no internet (checked {checked})",
+                     fix=PHONE_FIX + "; then `codemitra kaggle check`", url=SETTINGS_URL)
+    elif q is not None and not q["total_h"]:
+        phone.update(ok=False, detail="not yet (Kaggle shows 0 GPU hours)", fix=PHONE_FIX, url=SETTINGS_URL)
+    else:
+        phone.update(detail="not checked yet: `codemitra kaggle check` (about 1 min, no GPU hours)")
+    state = load_state()
+    if state.get("ref") == f"{user}/{SLUG}" and state.get("started"):
+        when = datetime.fromtimestamp(state["started"]).strftime("%d %b %H:%M")
+        s["run"].update(ok=True, detail=f"reached ready ({when})")
+    else:
+        s["run"].update(detail="not yet: `codemitra kaggle start` (4-8 min)")
+    return steps
+
+
+def first_open(steps: list[dict]) -> dict | None:
+    """The first step that needs the user (ok False), or None."""
+    return next((x for x in steps if x["ok"] is False), None)
+
+
+def render(steps: list[dict]) -> list[str]:
+    """e.g. '  ✓ 1. Kaggle account   saisarann' per step; the first open step's fix under it; 'ready' when all done."""
+    mark = {True: "✓", False: "✗", None: "·"}
+    width = max(len(x["title"]) for x in steps)
+    first = first_open(steps)
+    lines = ["Kaggle setup"]
+    for i, x in enumerate(steps, 1):
+        lines.append(f"  {mark[x['ok']]} {i}. {x['title']:<{width}}  {x['detail']}".rstrip())
+        if x is first and x["fix"]:
+            lines.append(f"       → {x['fix']}")
+    if first is None and all(x["ok"] for x in steps[:4]):
+        lines.append("  Ready: CodeMitra starts Kaggle by itself when you need it" +
+                     ("." if steps[4]["ok"] else " (or now: `codemitra kaggle start`)."))
+    return lines
+
+
+def guide(*, echo=print, ask=input, open_url=None, api_factory=None, sleep=time.sleep, tries: int = 3) -> bool:
+    """The checklist, then the first open step walked through: what to do, the page opened on request, a wait for
+    'done', checked again. True when Kaggle is ready to use. The token step stays with the caller (setup / wizard)."""
+    for attempt in range(tries + 1):
+        steps = checklist(probe=True, echo=echo, sleep=sleep, api_factory=api_factory)
+        for line in render(steps):
+            echo(line)
+        first = first_open(steps)
+        phone = next(x for x in steps if x["key"] == "phone")
+        if first is None:
+            return phone["ok"] is True
+        if first["key"] in ("account", "key") or (first["key"] == "hours" and phone["ok"]):
+            return False  # a token to paste (the caller asks for it) or hours used up: nothing to wait for here
+        if attempt == tries:
+            echo("  Still no internet? Kaggle can take a while to turn it on after you verify; `codemitra kaggle check` "
+                 "later shows this list again.")
+            return False
+        try:
+            if open_url and first["url"] and ask("  Open that page in your browser now? (Y/n) ").strip().lower() in (
+                    "", "y", "yes"):
+                open_url(first["url"])
+            answer = ask("  Type done when it is done (enter = later) ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer not in ("done", "d", "yes", "y", "ok"):
+            echo("  later: `codemitra kaggle check` shows this list again and checks it")
+            return False
+    return False

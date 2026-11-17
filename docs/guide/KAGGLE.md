@@ -15,6 +15,19 @@ Then the key for CodeMitra: **Settings** → **API** → **Generate New Token**,
 (or run `codemitra kaggle setup`): it finds it in Downloads. CodeMitra saves it where Kaggle looks, signs in and
 shows your hours.
 
+Then CodeMitra shows the **setup checklist**, every step checked now, the ones you have done marked ✓:
+```
+Kaggle setup
+  ✓ 1. Kaggle account  yourname
+  ✓ 2. API key         ~/.kaggle/access_token
+  ✗ 3. Phone verified  its notebooks get no internet, checked just now
+       → kaggle.com → your picture → Settings → Phone verification
+  ✓ 4. GPU hours       0.0 h used of 30 · 30.0 h left
+  · 5. First GPU run   not yet: `codemitra kaggle start` (4-8 min)
+```
+Step 3 is checked with a small CPU-only notebook (about 30 s, no GPU hours). CodeMitra offers to open the page, waits
+for you to type `done`, and checks again. See the list any time: `codemitra kaggle check` (or `/kaggle check`).
+
 ## Use it
 - **Start:** `/kaggle start` in CodeMitra (or `codemitra kaggle start`). It uploads a private notebook to your
   account and waits until the model is loaded (4-8 minutes; it shows each step). Every `codemitra` window then uses it.
@@ -44,6 +57,7 @@ to one private notebook, used by you and stopped when idle, but it is your accou
 | | |
 |---|---|
 | 0 GPU hours | verify your phone (Settings → Phone verification) |
+| "its notebooks get no internet" | verify your phone, then `codemitra kaggle check`; Kaggle can take a while to turn internet on after it |
 | "key expired" / "401" | Settings → API → Generate New Token, then `codemitra kaggle setup <token>` |
 | Start takes over 10 minutes | Kaggle is busy: `codemitra kaggle status`; try again later |
 | Hours used up | they reset weekly (the status shows when); CodeMitra uses the laptop meanwhile |

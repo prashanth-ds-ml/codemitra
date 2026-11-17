@@ -1,5 +1,13 @@
 # Status
 
+**2026-11-17, later: v0.8.8 ready (I-34, E-139/F-131), committed, push on the user's OK after the release check.**
+Kaggle setup checklist (account, key, phone = notebook internet, GPU hours, first run; done steps shown ✓), `codemitra
+kaggle check` / `/kaggle check` with a CPU-only internet probe (live on our account: 22-25 s, no GPU hours; internet-off
+probe gave #13's exact error in 46 s), `kaggle start` checks internet before any GPU push, the guide opens the page and
+waits for "done". 1,274 tests. Next: saran runs `codemitra update` then `codemitra kaggle check` after verifying his
+phone. Note: a GPU run of codemitra-gpu-server was RUNNING on our account from 06:07 UTC (the installed CodeMitra's
+when-needed start), left alone.
+
 **2026-11-17: v0.8.7 PUBLISHED** (pushed 6d40421, CI green on Windows + Linux, tag v0.8.7 + pre-release, reply
 posted on #13). Items 1-2 below are done; saran now verifies his phone and runs `codemitra update`.
 

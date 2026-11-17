@@ -204,6 +204,16 @@ New ideas land here first, with a one-line impact guess. They move into PLAN.md 
   local electricity as watts x time (estimate, never claimed as measured), by version. No "time saved" claim (not
   measurable) unless tasks are timed by hand. Data already logged per turn (tokens_in/out, seconds, backend, outcome,
   verdict, tests_passed, user_edit). ~0.5 day after I-32. Impact: medium-high (evidence for friends and posts).
+- **I-34 Guided Kaggle setup with a live checklist** — BUILT 2026-11-17 as v0.8.8 (E-139/F-131); the chat answering setup questions from the guide is still an idea. (user, 2026-11-17, after issue #13: "we have to guide the users
+  directly in codemitra"; "if any of the steps are already completed we need to show or tell they are completed").
+  One checklist, every step checked live, done ones shown as done (✓ + what was found), the first open one guided:
+  1 account (named from the key), 2 API key (where), 3 phone verified = notebook internet (probe: a tiny CPU-only
+  notebook that only curls, ~1 min, no GPU hours; remembered once it passes), 4 GPU hours left, 5 a GPU run that
+  reached ready. Shown by `codemitra setup`, `kaggle setup` (also when a key exists: today that path skips the phone
+  note, likely saran's case), `kaggle status`, `/kaggle`. Open step → say what to do, offer to open the page, wait
+  for "done", check again, continue; still failing → Kaggle may need time. A `/kaggle start` that hits no internet
+  runs the same guide. Later: the chat answers setup questions from docs/guide + the live checklist. Unproven: the
+  CPU-only probe (push with no accelerator + internet on). ~0.5 day + tests. Impact: high (every new user hits it).
 
 ## Later (not milestones)
 Data pack, CodeMitra as an MCP server, debug-brief experiment, escalation ladder,

@@ -251,10 +251,8 @@ def step_kaggle(io: IO, m: Machine, auto: bool, want: bool | None = None) -> Res
             backend.save_prefs(kaggle_use="never", onboarded=True)
         return Result("Kaggle", None, "skipped (later: `codemitra kaggle setup`)")
     if K.key_path().exists() or K.token_path().exists():
-        if K.setup("", echo=lambda t: io.say("  " + t)):
-            if not decided:
-                backend.save_prefs(kaggle_use="when-needed", onboarded=True)
-            return Result("Kaggle", True, "signed in; it starts by itself when you need it (`codemitra kaggle start`)")
+        if K.setup("", echo=lambda t: io.say("  " + t), next_hint=False):
+            return _kaggle_checked(io, auto, decided)
     io.say("Kaggle needs two things only you can do on its website (2 minutes):\n"
            "  1. a free account (skip if you have one): sign up with Google or email\n"
            "  2. your phone verified: Settings → Phone verification (Kaggle needs it for GPUs)\n"
@@ -268,11 +266,29 @@ def step_kaggle(io: IO, m: Machine, auto: bool, want: bool | None = None) -> Res
                        "").strip()
         if token.lower() == "skip":
             break
-        if K.setup(token, echo=lambda t: io.say("  " + t)):
-            if not decided:
-                backend.save_prefs(kaggle_use="when-needed", onboarded=True)
-            return Result("Kaggle", True, "signed in; it starts by itself when you need it (`codemitra kaggle start`)")
+        if K.setup(token, echo=lambda t: io.say("  " + t), next_hint=False):
+            return _kaggle_checked(io, auto, decided)
     return Result("Kaggle", False, "not set up yet: `codemitra kaggle setup <token>` any time")
+
+
+def _kaggle_checked(io: IO, auto: bool, decided: bool) -> Result:
+    """Signed in: the setup checklist (I-34), every step checked, the done ones shown as done; the phone step guided
+    (with --yes: checked and shown, nothing asked). Issue #13: a key and GPU hours, but no notebook internet."""
+    from app import backend
+    from app import kaggle as K
+    if not decided:
+        backend.save_prefs(kaggle_use="when-needed", onboarded=True)
+    if auto:
+        steps = K.checklist(probe=True, echo=lambda t: io.say(t))
+        for line in K.render(steps):
+            io.say("  " + line)
+        ready = K.first_open(steps) is None
+    else:
+        ready = K.guide(echo=lambda t: io.say("  " + t), ask=lambda q: io.ask(q.strip(), ""), open_url=io.open_url,
+                        sleep=io.sleep)
+    if ready:
+        return Result("Kaggle", True, "signed in and checked; it starts by itself when you need it")
+    return Result("Kaggle", False, "signed in, one step left (shown above): `codemitra kaggle check` after it")
 
 
 # ── 4. about you, 5. sharing ─────────────────────────────────────────────────────────────────────────────────────

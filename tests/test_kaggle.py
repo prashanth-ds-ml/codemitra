@@ -17,19 +17,31 @@ KAGGLE_DIR = pathlib.Path(__file__).resolve().parents[1] / "remote" / "kaggle"
 class FakeApi:
     """Push, status, live log and quota, scripted."""
 
-    def __init__(self, log_lines, statuses=("RUNNING",), used_h=1.0):
+    def __init__(self, log_lines, statuses=("RUNNING",), used_h=1.0, net="MITRA|net|ok=True|detail="):
         self.log_lines, self.statuses, self.used_h = list(log_lines), list(statuses), used_h
         self.pushed = []
+        self.net, self.net_pushed = net, []  # I-34: the CPU-only internet check notebook
 
     def get_config_value(self, key):
         return "someone"
 
     def kernels_status(self, ref):
+        if ref.endswith(kaggle.NET_SLUG):
+            return SimpleNamespace(status=SimpleNamespace(name="COMPLETE"), failure_message="")
         name = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
         return SimpleNamespace(status=SimpleNamespace(name=name), failure_message="")
 
+    def kernels_output(self, ref, path):
+        p = pathlib.Path(path)
+        p.mkdir(parents=True, exist_ok=True)
+        (p / f"{kaggle.NET_SLUG}.log").write_text(json.dumps([{"data": self.net + "\n"}]), encoding="utf-8")
+
     def kernels_push(self, folder, timeout=None, acc=None):
         meta = json.loads((pathlib.Path(folder) / "kernel-metadata.json").read_text(encoding="utf-8"))
+        if meta["id"].endswith(kaggle.NET_SLUG):
+            self.net_pushed.append({"meta": meta, "code": (pathlib.Path(folder) / "check.py").read_text(encoding="utf-8"),
+                                    "timeout": timeout, "acc": acc})
+            return SimpleNamespace(error="", url="")
         nb = json.loads((pathlib.Path(folder) / f"{kaggle.SLUG}.ipynb").read_text(encoding="utf-8"))
         self.pushed.append({"meta": meta, "nb": nb, "timeout": timeout, "acc": acc})
         return SimpleNamespace(error="", url="https://www.kaggle.com/code/someone/codemitra-gpu-server")
