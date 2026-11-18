@@ -192,8 +192,13 @@ _MARKDOWN = re.compile(r"[*_`#>]+")
 _ASKS_CHANGE = re.compile(r"\b(fix|fixes|fixing|add|build|create|make|write|implement|change|update|edit|complete|"
                           r"finish|repair|correct|resolve|solve|refactor|rename|remove|delete|apply|install|do (it|that|"
                           r"this|so|the)|go ahead|continue|keep going)\b", re.IGNORECASE)
-_ASKS_ONLY = re.compile(r"\b(first tell me|just tell me|only tell me|don'?t (change|fix|edit)|do not (change|fix|edit)|"
-                        r"without changing|explain|review .* (first|only)|tell me where)\b", re.IGNORECASE)
+# E-142: "do not change discount.py" names a file to leave alone ("add tests for it, do not change discount.py"), so
+# a file name after it does not make the request look-only
+_ASKS_ONLY = re.compile(r"\b(first tell me|just tell me|only tell me|(don'?t|do not) (change|fix|edit)"
+                        r"(?!\s+[\w./\\-]+\.[A-Za-z]{1,5}\b)|without changing|explain|review .* (first|only)|"
+                        r"tell me where)\b", re.IGNORECASE)
+# E-142: a question about a change ("how would I fix this?") is still a look
+_WH_QUESTION = re.compile(r"^\s*(how|what|why|where|which|who|should i|would it|is there|are there)\b", re.IGNORECASE)
 REPEAT_RATIO = 0.8  # a decide answer this close to the last answer repeats it
 CLAIM_NOTE = ("[CodeMitra: your last answer said {claims}, but this turn's tool results do not back it: {facts}. If "
               "an earlier turn did it, say which; otherwise, in your next answer, first correct it plainly for the "
@@ -1138,6 +1143,12 @@ class ChatSession:
         if not self.phase_request:
             return res  # talked: one call
         asked = name = self.phase_request["name"]
+        if name == "look_at_code" and asks_change(user) and not _WH_QUESTION.search(user or ""):
+            # E-142 (practice 2026-11-18): "Add pytest tests for discount()", "Make it return 0.0 for an empty list":
+            # the decide call picked a look, the look read the file and answered with how to fix it, nothing changed.
+            # The change phase reads files too, so a clear change request starts there
+            name = "make_change"
+            self.rec.write("phase_override", turn=self.turn_no, asked="look_at_code", to=name)
         self._skills_given: set[str] = set()  # v0.9.0: a skill is loaded at most once per turn
         if name not in PHASES:  # it called a real tool by name: the phase that has it
             # E-126: a read to start a change ("fix it" -> read_file) is the change phase, which reads too

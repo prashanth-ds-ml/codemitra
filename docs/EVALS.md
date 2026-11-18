@@ -36,6 +36,18 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Built-in skills, first with / without run (2026-11-18, laptop, qwen3.5:4b at 32K, 1 repeat, e579a4e)
+`codemitra practice --skill <name>` (results/practice.jsonl). Before E-142.
+
+| Skill | Passed without -> with | Checked after its last change | Note |
+|---|---|---|---|
+| verify-before-done | 1/4 -> 2/4 (margin +-49) | 1/2 -> 1/3 | csv-total passed only with it |
+| writing-tests | 0/3 -> 0/3 | 0/0 -> 0/0 | every run changed nothing |
+| debugging | 2/3 -> 2/3 | 2/3 -> 1/3 | leap-days failed both ways |
+
+Most failures were not about skills: CodeMitra stayed in the look phase and answered with how to fix it, writing
+nothing (E-142, fixed). Not a verdict on any skill; to rerun after E-142 with 2+ repeats.
+
 ## Live checks of must-haves 7, 9 and the practice set (2026-11-15, Kaggle 2x T4, qwen3.5:latest at 256K)
 
 **Fair keep/drop gate (must-have 7), one `codemitra improve --chat --remote` round.** Proposed rule: "When answering

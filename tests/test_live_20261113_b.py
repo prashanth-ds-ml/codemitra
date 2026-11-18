@@ -109,7 +109,8 @@ def test_an_edit_inside_a_look_switches_to_the_change_phase(tmp_path):
               AIMessage(content="", tool_calls=[tc("edit_file", 4, path="neon_chomp/maze.py", old="215", new="214")]),
               AIMessage(content="Changed neon_chomp/maze.py:1. Untested: no tests for neon_chomp."))
     s = _session(ws, m)
-    s.phased(_msgs("go a head and complete all the required things"))
+    # E-142: a clear change request now starts in the change phase; a question that leads to an edit still switches
+    s.phased(_msgs("what is wrong with the pellet count in neon chomp? fix it"))
     assert "214" in (ws / "neon_chomp" / "maze.py").read_text(encoding="utf-8")
     assert "make_change" in m.offered[1] and "edit_file" in m.offered[-1]   # offered in the look, then used
     assert [r.get("name") for r in _rows(s) if r["kind"] == "phase"][-1] == "make_change"

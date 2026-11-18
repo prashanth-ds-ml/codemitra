@@ -152,7 +152,7 @@ def test_looking_first_then_changing_works_in_one_turn(tmp_path):
             AIMessage(content="", tool_calls=[tc("edit_file", 4, path="calc.py", old="a - b", new="a + b")]),
             AIMessage(content="Changed calc.py:2 to add; the test passes."))
     s = _session(tmp_path, m)
-    res = s.phased(_msgs("make add in calc.py add instead of subtract"))
+    res = s.phased(_msgs("why does add in calc.py subtract? make it add"))  # E-142: a question, so a look first
     assert (tmp_path / "calc.py").read_text(encoding="utf-8").endswith("return a + b\n")
     assert res.tests_run == 1 and res.last_test_ok is True and res.unverified == []
     assert res.text.startswith("Changed calc.py:2") and s.last_phase == "make_change"

@@ -112,7 +112,7 @@ def test_an_empty_folder_tells_the_look_phase_how_to_create_the_file(tmp_path):
             AIMessage(content="Created solution.py with add."))
     from tests.test_chat_core import fake_hooks
     s = C.ChatSession(workspace=ws, llm=m, hooks=fake_hooks()[0])
-    s.phased(_msgs("Write a Python function `add` in solution.py"))
+    s.phased(_msgs("what is in this folder? I will need an add function in solution.py"))  # E-142: a look
     seen = {x.tool_call_id: x.content for x in m.seen[-1] if isinstance(x, ToolMessage)}
     assert "This folder is empty" in seen["c2"] and "call make_change now" in seen["c2"]
     assert "does not exist yet" in seen["c3"]
