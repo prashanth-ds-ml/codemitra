@@ -312,6 +312,18 @@ def wants_output_file(request: str) -> list[str]:
     return [m.group(1) for m in _OUTPUT_FILE.finditer(request or "")]
 
 
+# E-146 (xlsx practice 2026-11-18, add-rows 2/2 runs with the skill): the decide call answered with the text
+# "*make_change*: Add two items to stock.xlsx ..." instead of calling the phase, and the turn ended
+_TEXT_PHASE = re.compile(r"^\s*[*_`\[]*\s*(make_change|look_at_code|look_up|propose_plan)\s*[*_`\]]*\s*[:\-–]\s*(.+)",
+                         re.DOTALL)
+
+
+def text_phase(text: str) -> tuple[str, str] | None:
+    """E-146: (phase, what) when an answer is only a phase written as text, e.g. "*make_change*: add two rows"."""
+    m = _TEXT_PHASE.match(text or "")
+    return (m.group(1), m.group(2).strip()[:300]) if m else None
+
+
 def says_cannot(text: str) -> bool:
     """E-143: the answer says CodeMitra cannot create / write / change something (it can)."""
     return bool(_CANNOT.search(text or ""))
@@ -1207,6 +1219,11 @@ class ChatSession:
                 res = self._decide(messages, res, len(messages) - 1, asks_search, retry=True)
             finally:
                 messages[:] = [m for m in messages if m is not note]
+        if not self.phase_request and text_phase(res.text):
+            phase_name, what = text_phase(res.text)
+            self.phase_request = {"name": phase_name, "args": {"what": what}, "id": "text-phase"}
+            self.rec.write("phase", turn=self.turn_no, step=res.steps, name=phase_name, args={"what": what},
+                           from_text=True)
         if not self.phase_request and says_cannot(res.text) and asks_change(self._prev_user_full or user):
             # E-143: "I can't directly create an .xlsx file" to a request to make one: it can (a script it runs)
             self.rec.write("cannot", turn=self.turn_no, step=res.steps, text=(res.text or "")[-300:])
@@ -1226,6 +1243,7 @@ class ChatSession:
             name = "make_change"
             self.rec.write("phase_override", turn=self.turn_no, asked="look_at_code", to=name)
         self._skills_given: set[str] = set()  # v0.9.0: a skill is loaded at most once per turn
+        self._unrun_script = ""  # E-145 (practice 2026-11-18, delete-rows): kept across a look -> change switch
         if name not in PHASES:  # it called a real tool by name: the phase that has it
             # E-126: a read to start a change ("fix it" -> read_file) is the change phase, which reads too
             wants_change = asks_change(user) or bool(go_note) or (is_go_ahead(user) and asks_change(before[-300:]))
@@ -1527,7 +1545,6 @@ class ChatSession:
         promise_nudged = False
         missing_nudged = False  # E-144: an answer naming an output file that does not exist, once per turn
         script_nudged = False   # E-145: a script written for an output file but not run, once per turn
-        unrun_script = ""       # E-145: the .py written last in this turn, until a command or the tests run
         for step in range(1, max_steps + 1):
             if self.cancelled:
                 res.stopped, res.stop_reason = True, "cancelled (timed out)"
@@ -1668,6 +1685,7 @@ class ChatSession:
                 messages.append(HumanMessage(content=CHANGE_PROMISE_NOTE if kind == "promise" else NOTHING_WRITTEN_NOTE))
                 continue
             outputs = wants_output_file(self._prev_user_full)
+            unrun_script = getattr(self, "_unrun_script", "")
             if (not reply.tool_calls and not script_nudged and unrun_script and outputs and not self.deciding
                     and not last and step < max_steps and self.last_phase == "make_change"):
                 # E-145 (xlsx practice 2026-11-18, inventory-value 0/4): "in inventory.xlsx add a column": it wrote a
@@ -1709,9 +1727,9 @@ class ChatSession:
                     continue
                 name, args = tc["name"], tc.get("args") or {}
                 if name in ("write_file", "edit_file", "append_file") and str(args.get("path", "")).endswith(".py"):
-                    unrun_script = str(args.get("path"))   # E-145: written, not run yet
+                    self._unrun_script = str(args.get("path"))   # E-145: written, not run yet (whole turn)
                 elif name in ("run_command", "run_tests"):
-                    unrun_script = ""
+                    self._unrun_script = ""
                 if self.cancelled:
                     messages.append(ToolMessage(content="✗ Not run: the turn was cancelled.", tool_call_id=tc["id"]))
                     stop = "cancelled (timed out)"

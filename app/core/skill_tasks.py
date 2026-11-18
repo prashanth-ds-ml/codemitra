@@ -269,7 +269,7 @@ XLSX += [
           "for r in ws.iter_rows(min_row=2, values_only=True):\n"
           "    if r[name] in (None, ''):\n"
           "        break\n"
-          "    if str(r[name]).strip().lower() in ('total', 'grand total'):\n"
+          "    if str(r[name]).strip().lower().startswith(('total', 'grand total', 'sum')):  # 'Total Stock' too\n"
           "        break\n"
           "    rows.append(r)\n"
           "assert len(rows) >= 6, ('at least 6 items', len(rows))\n"

@@ -2497,6 +2497,8 @@ def cmd_practice(
                                 "flip; one run moves a few tasks by noise)."),
     skill: str = typer.Option("", "--skill", help="A built-in skill: run its tasks without it, then with it, and "
                               "compare (v0.9.0: a skill is kept only when it helps)."),
+    arms: str = typer.Option("both", "--arms", help="With --skill: both | with | without (a skill ladder reruns only "
+                             "'with' against one baseline)."),
 ) -> None:
     """Coding practice (D-078 step 5): CodeMitra solves small Python and SQL tasks in a fresh folder, writes its own
     tests, and a hidden check decides; results in results/practice.jsonl."""
@@ -2514,7 +2516,7 @@ def cmd_practice(
             raise typer.Exit(1)
         return
     if skill:
-        _practice_skill(skill, model, remote, ctx, arch, repeats, say)
+        _practice_skill(skill, model, remote, ctx, arch, repeats, say, arms)
         return
     if kind not in ("", "python", "sql") or split not in ("", "learn", "held_out"):
         raise typer.BadParameter("--kind python|sql, --split learn|held_out")
@@ -2547,7 +2549,8 @@ def cmd_practice(
     say(f"  kept in {P.results_path()} · records: {runner.records}", "m.faint")
 
 
-def _practice_skill(name: str, model: str, remote: bool, ctx: int, arch: str, repeats: int, say) -> None:
+def _practice_skill(name: str, model: str, remote: bool, ctx: int, arch: str, repeats: int, say,
+                    arms: str = "both") -> None:
     """v0.9.0 F-0: one built-in skill's tasks, without it and then with it (the same tasks, the same model)."""
     from app import skills as SK
     from app.core import harness as harness_mod
@@ -2565,7 +2568,14 @@ def _practice_skill(name: str, model: str, remote: bool, ctx: int, arch: str, re
     llm, model_name, num_ctx, backend = _score_model(model, remote, ctx, arch)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     rows = {}
-    for arm, chosen in (("without", None), ("with", found)):
+    if arms not in ("both", "with", "without"):
+        raise typer.BadParameter("--arms both|with|without")
+    plan = [(a, c) for a, c in (("without", None), ("with", found)) if arms in ("both", a)]
+    body = (SK.builtin_dir() / name / "SKILL.md").read_text(encoding="utf-8")
+    note = SK.skill_note(".", found)
+    say(f"  skill `{name}`: {len(body):,} characters in SKILL.md · {len(note):,} characters loaded into a turn "
+        f"(about {(len(note) + 3) // 4:,} tokens)", "m.tool")
+    for arm, chosen in plan:
         runner = S.Runner(llm=llm, harness=harness_mod.load(), num_ctx=num_ctx, backend=backend,
                           records=store_mod.root() / "practice-runs" / f"{stamp}-{name}-{arm}", arch=arch,
                           skills=chosen)
@@ -2580,8 +2590,18 @@ def _practice_skill(name: str, model: str, remote: bool, ctx: int, arch: str, re
 
         rows[arm] = P.run(tasks, runner, model=model_name, on_task=line, repeats=max(1, repeats))
     console.print()
-    for ln in P.skill_compare(rows["without"], rows["with"]).splitlines():
-        say("  " + ln, "m.tool")
+    if len(rows) == 2:
+        for ln in P.skill_compare(rows["without"], rows["with"]).splitlines():
+            say("  " + ln, "m.tool")
+    else:
+        (arm, row), = rows.items()
+        s = row.get("summary") or {}
+        per: dict[str, list[bool]] = {}
+        for r in row.get("results") or []:
+            per.setdefault(r["id"].split("/")[-1], []).append(bool(r.get("passed")))
+        say(f"  {arm}: passed {sum(sum(v) for v in per.values())}/{sum(len(v) for v in per.values())}", "m.tool")
+        for tid, v in sorted(per.items()):
+            say(f"    {tid:22} {sum(v)}/{len(v)}", "m.tool")
     say(f"  kept in {P.results_path()}", "m.faint")
 
 
