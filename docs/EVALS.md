@@ -48,6 +48,10 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 Most failures were not about skills: CodeMitra stayed in the look phase and answered with how to fix it, writing
 nothing (E-142, fixed). Not a verdict on any skill; to rerun after E-142 with 2+ repeats.
 
+**After E-142 (c5520c4, same setup):** writing-tests passed 2/3 -> 3/3 (margin +-33), checked after its last change
+3/3 -> 3/3, median 28 s -> 25 s; discount passed only with the skill. Before the fix both arms were 0/3: the fix
+mattered more than the skill. One repeat: promising, not proof.
+
 ## Live checks of must-haves 7, 9 and the practice set (2026-11-15, Kaggle 2x T4, qwen3.5:latest at 256K)
 
 **Fair keep/drop gate (must-have 7), one `codemitra improve --chat --remote` round.** Proposed rule: "When answering

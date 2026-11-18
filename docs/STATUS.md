@@ -1,6 +1,13 @@
 # Status
 
-**PAUSED 2026-11-17 (user travelling ~1 h), v0.9.0 skills in progress, NOT committed:** built-in skills ship in
+**2026-11-18 09:55, user left for the office. Committed locally, NOT pushed:** e579a4e (skills foundation + skills
+1-3), 6e57206 (xlsx skill + 3 tasks), c5520c4 (E-142: change requests no longer end as an explanation in the look
+phase; found by the first skill run: all 6 test-writing runs changed nothing). 1,327 tests pass. Skill results so far
+in EVALS.md: writing-tests after E-142 2/3 -> 3/3. **Next:** rerun verify-before-done and debugging after E-142 with 2
+repeats, then xlsx; keep or drop each; then pdf / docx / python-game / streamlit-app / long-document; push + release
+v0.9.0 on the user's OK. The model is unloaded.
+
+**Earlier (2026-11-17, paused for a trip), v0.9.0 skills in progress:** built-in skills ship in
 `app/builtin_skills/` (found in every project; project > yours > built-in); a matching skill's text is loaded into the
 turn's phase note by rules (`triggers`, `when: change`), never into the cached system prompt; the 23 local-codex
 skills removed (`git rm -r skills`); `codemitra practice --skill <name>` runs a skill's tasks without and with it
