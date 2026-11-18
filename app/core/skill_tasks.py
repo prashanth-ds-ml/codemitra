@@ -233,6 +233,67 @@ XLSX = [
           "assert ws.max_row == 4, ws.max_row\n",
           ) ,
 ]
+_STOCK_SETUP = ("from openpyxl import Workbook\nwb = Workbook()\nws = wb.active\nws.title = 'Stock'\n"
+                "ws.append(['Item', 'Category', 'Qty', 'Price'])\n"
+                "for row in [['rose', 'flower', 40, 10], ['apple', 'fruit', 0, 60], ['tulip', 'flower', 15, 25],\n"
+                "            ['banana', 'fruit', 120, 5], ['orchid', 'flower', 0, 150], ['grapes', 'fruit', 35, 80]]:\n"
+                "    ws.append(row)\n"
+                "ws.append(['Total', None, '=SUM(C2:C7)', None])\nwb.save('stock.xlsx')\n")
+_ROWS = ("import re\nfrom openpyxl import load_workbook\n"
+         "ws = load_workbook('stock.xlsx')['Stock']\n"
+         "rows = [[c.value for c in r][:4] for r in ws.iter_rows(min_row=2, max_row=ws.max_row)]\n"
+         "assert [c.value for c in ws[1]][:4] == ['Item', 'Category', 'Qty', 'Price'], [c.value for c in ws[1]]\n"
+         "assert all(any(v not in (None, '') for v in r) for r in rows), ('a blank row', rows)\n"
+         "total = rows[-1]\n"
+         "assert str(total[0]).strip().lower() == 'total', ('the Total row must stay last', rows)\n"
+         "items = rows[:-1]\n"
+         "f = str(total[2]).replace(' ', '').replace('$', '').upper()\n"
+         "assert f == f'=SUM(C2:C{len(items) + 1})', ('the total must add every item row', f, len(items))\n")
+
+XLSX += [
+    _task("xlsx", "design-shop",
+          "Make shop.xlsx: an inventory for a small shop that sells flowers and fruits, with sample data.",
+          {},
+          "from openpyxl import load_workbook\n"
+          "ws = load_workbook('shop.xlsx').worksheets[0]\n"
+          "head = [str(c.value).strip().lower() for c in ws[1] if c.value not in (None, '')]\n"
+          "assert len(head) >= 4, ('at least 4 columns', head)\n"
+          "def col(*words):\n"
+          "    for i, h in enumerate(head):\n"
+          "        if any(w in h for w in words):\n"
+          "            return i\n"
+          "    raise AssertionError(('no column for', words, head))\n"
+          "name, cat = col('item', 'name', 'product'), col('categ', 'type', 'kind')\n"
+          "qty, price = col('qty', 'quant', 'stock', 'units', 'count'), col('price', 'cost', 'rate', 'mrp')\n"
+          "rows = []\n"
+          "for r in ws.iter_rows(min_row=2, values_only=True):\n"
+          "    if r[name] in (None, ''):\n"
+          "        break\n"
+          "    if str(r[name]).strip().lower() in ('total', 'grand total'):\n"
+          "        break\n"
+          "    rows.append(r)\n"
+          "assert len(rows) >= 6, ('at least 6 items', len(rows))\n"
+          "cats = ' '.join(str(r[cat]).lower() for r in rows)\n"
+          "assert 'flower' in cats and 'fruit' in cats, ('both flowers and fruits', cats)\n"
+          "for r in rows:\n"
+          "    assert isinstance(r[qty], (int, float)) and isinstance(r[price], (int, float)), ('numbers, not text', r)\n"),
+    _task("xlsx", "add-rows",
+          "Add two items to stock.xlsx: mango (fruit, quantity 30, price 40) and lily (flower, quantity 25, price 15). "
+          "Keep the Total right.",
+          {},
+          _ROWS + "names = [r[0] for r in items]\n"
+          "assert names[:6] == ['rose', 'apple', 'tulip', 'banana', 'orchid', 'grapes'], ('old rows changed', names)\n"
+          "got = {r[0]: r[1:] for r in items}\n"
+          "assert got.get('mango') == ['fruit', 30, 40] and got.get('lily') == ['flower', 25, 15], got\n"
+          "assert len(items) == 8, names\n"),
+    _task("xlsx", "delete-rows",
+          "Remove every item with quantity 0 from stock.xlsx. Keep the Total right.",
+          {},
+          _ROWS + "assert [r[0] for r in items] == ['rose', 'tulip', 'banana', 'grapes'], [r[0] for r in items]\n"
+          "assert [r[2] for r in items] == [40, 15, 120, 35], [r[2] for r in items]\n"),
+]
+XLSX[4].extra["setup"] = _STOCK_SETUP
+XLSX[5].extra["setup"] = _STOCK_SETUP
 XLSX[2].extra["setup"] = ("from openpyxl import Workbook\nwb = Workbook()\nws = wb.active\nws.title = 'Stock'\n"
                           "ws.append(['Item', 'Qty', 'Price'])\nws.append(['pen', 10, 100])\nws.append(['book', 4, 250])\n"
                           "ws.append(['bag', 1, 900])\nws['F1'] = 'checked by: Asha'\nwb.save('inventory.xlsx')\n")

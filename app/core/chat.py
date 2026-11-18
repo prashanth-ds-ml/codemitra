@@ -302,6 +302,16 @@ def missing_note(files: list[str], scripts: list[str]) -> str:
     return MISSING_NOTE.format(files=shown, it="it" if len(files) == 1 else "they", hint=hint)
 
 
+SCRIPT_NOT_RUN_NOTE = ("[CodeMitra: you wrote `{script}` but did not run it after your last change, so {what} was not "
+                       "made or changed. Run it now (run_command: `python {script}`), read the output, check the file, "
+                       "then answer.]")
+
+
+def wants_output_file(request: str) -> list[str]:
+    """E-145: output files a request names ("in stock.xlsx add ...", "create report.pdf")."""
+    return [m.group(1) for m in _OUTPUT_FILE.finditer(request or "")]
+
+
 def says_cannot(text: str) -> bool:
     """E-143: the answer says CodeMitra cannot create / write / change something (it can)."""
     return bool(_CANNOT.search(text or ""))
@@ -1516,6 +1526,8 @@ class ChatSession:
         empty_nudged = False
         promise_nudged = False
         missing_nudged = False  # E-144: an answer naming an output file that does not exist, once per turn
+        script_nudged = False   # E-145: a script written for an output file but not run, once per turn
+        unrun_script = ""       # E-145: the .py written last in this turn, until a command or the tests run
         for step in range(1, max_steps + 1):
             if self.cancelled:
                 res.stopped, res.stop_reason = True, "cancelled (timed out)"
@@ -1655,6 +1667,17 @@ class ChatSession:
                 messages.append(AIMessage(content=reply.content or streamed.text or ""))
                 messages.append(HumanMessage(content=CHANGE_PROMISE_NOTE if kind == "promise" else NOTHING_WRITTEN_NOTE))
                 continue
+            outputs = wants_output_file(self._prev_user_full)
+            if (not reply.tool_calls and not script_nudged and unrun_script and outputs and not self.deciding
+                    and not last and step < max_steps and self.last_phase == "make_change"):
+                # E-145 (xlsx practice 2026-11-18, inventory-value 0/4): "in inventory.xlsx add a column": it wrote a
+                # script, never ran it, and said done; the file existed, so E-144 could not see it
+                script_nudged = True
+                self.rec.write("script_not_run", turn=self.turn_no, step=step, script=unrun_script, outputs=outputs[:4])
+                messages.append(AIMessage(content=reply.content or streamed.text or ""))
+                messages.append(HumanMessage(content=SCRIPT_NOT_RUN_NOTE.format(
+                    script=Path(unrun_script).as_posix(), what=", ".join(f"`{o}`" for o in outputs[:3]))))
+                continue
             if (not reply.tool_calls and not missing_nudged and not self.deciding and not last and step < max_steps
                     and self.last_phase == "make_change"):
                 gone = missing_outputs(streamed.text, self.ws.root)
@@ -1685,6 +1708,10 @@ class ChatSession:
                     messages.append(ToolMessage(content="✗ Not run: the turn was stopped.", tool_call_id=tc["id"]))
                     continue
                 name, args = tc["name"], tc.get("args") or {}
+                if name in ("write_file", "edit_file", "append_file") and str(args.get("path", "")).endswith(".py"):
+                    unrun_script = str(args.get("path"))   # E-145: written, not run yet
+                elif name in ("run_command", "run_tests"):
+                    unrun_script = ""
                 if self.cancelled:
                     messages.append(ToolMessage(content="✗ Not run: the turn was cancelled.", tool_call_id=tc["id"]))
                     stop = "cancelled (timed out)"

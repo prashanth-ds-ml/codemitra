@@ -42,8 +42,11 @@ def test_the_live_turn_gets_one_nudge_and_runs_the_script(tmp_path):
     s = _session(tmp_path, m)
     s.phased(_msgs("Create expenses.xlsx from expenses.csv."))
     rows = _rows(s)
-    assert [r["files"] for r in rows if r["kind"] == "missing_output"] == [["expenses.xlsx"]]
-    assert any("You wrote `build_expenses.py` but did not run it" in x for x in m.heard[3])
+    # E-145 (a script written for a requested output and not run) fires first here; either nudge names the script
+    # (this test's fake shell does not really run it, so the file stays missing and E-144 also fires, once)
+    assert [r["kind"] for r in rows if r["kind"] in ("missing_output", "script_not_run")] == [
+        "script_not_run", "missing_output"]
+    assert any("wrote `build_expenses.py` but did not run it" in x for x in m.heard[3])
 
 
 def test_an_answer_whose_files_exist_is_not_nudged(tmp_path):

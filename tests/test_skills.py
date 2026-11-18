@@ -80,7 +80,7 @@ class TestSkillDiscovery:
         """v0.9.0 (BUILD_V09 F-1): the 23 local-codex skills were removed; built-in skills live in the package."""
         assert not (REPO_ROOT / "skills").exists()
         names = {skill.name for skill in skills.discover(str(REPO_ROOT)) if skill.source == "builtin"}
-        assert "verify-before-done" in names
+        assert "xlsx" in names
 
 
 def test_phase7_templates_exist():

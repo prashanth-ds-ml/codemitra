@@ -19,20 +19,20 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 # ── F-1: built-in skills in every project ────────────────────────────────────────────────────────────────────────
 def test_a_built_in_skill_is_found_in_an_empty_project(tmp_path):
     found = {s.name: s for s in SK.discover(str(tmp_path))}
-    assert found["verify-before-done"].source == "builtin"
+    assert found["xlsx"].source == "builtin"
 
 
 def test_the_project_and_yours_win_a_name_over_the_built_in_one(tmp_path):
-    proj = tmp_path / "skills" / "verify-before-done"
+    proj = tmp_path / "skills" / "xlsx"
     proj.mkdir(parents=True)
-    (proj / "SKILL.md").write_text("---\nname: verify-before-done\ndescription: Mine.\n---\nmine\n", encoding="utf-8")
-    s = next(x for x in SK.discover(str(tmp_path)) if x.name == "verify-before-done")
+    (proj / "SKILL.md").write_text("---\nname: xlsx\ndescription: Mine.\n---\nmine\n", encoding="utf-8")
+    s = next(x for x in SK.discover(str(tmp_path)) if x.name == "xlsx")
     assert s.source == "project" and s.description == "Mine."
 
 
 def test_use_skill_reads_a_built_in_skill(tmp_path):
-    out = SK.use_skill(str(tmp_path), SK.discover(str(tmp_path)), "verify-before-done")
-    assert out.startswith("Skill verify-before-done (built in)") and "after your LAST edit" in out
+    out = SK.use_skill(str(tmp_path), SK.discover(str(tmp_path)), "xlsx")
+    assert out.startswith("Skill xlsx (built in)") and "openpyxl" in out
 
 
 def test_every_built_in_skill_meets_f0_and_says_where_it_came_from():
@@ -70,10 +70,10 @@ def test_a_when_change_skill_comes_with_every_change_and_request_matches_go_firs
 
 
 def test_the_note_has_the_skill_text_without_its_front_matter(tmp_path):
-    chosen = [s for s in SK.builtin_skills() if s.name == "verify-before-done"]
+    chosen = [s for s in SK.builtin_skills() if s.name == "xlsx"]
     note = SK.skill_note(str(tmp_path), chosen)
-    assert note.startswith("[CodeMitra: skill `verify-before-done` fits this request. Follow it:]")
-    assert "when: change" not in note and "after your LAST edit" in note
+    assert note.startswith("[CodeMitra: skill `xlsx` fits this request. Follow it:]")
+    assert "triggers:" not in note and "openpyxl" in note
 
 
 def test_the_chat_loads_it_once_per_turn_and_records_it(tmp_path):
@@ -169,10 +169,10 @@ def test_each_mutant_really_differs_from_the_correct_code():
         assert len(ns["MUTANTS"]) == 3 and all(m != ns["CORRECT"] for m in ns["MUTANTS"]), task.id
 
 
-def test_the_skill_example_is_not_one_of_its_practice_tasks():
-    body = (SK.builtin_dir() / "writing-tests" / "SKILL.md").read_text(encoding="utf-8")
-    for task in ST.for_skill("writing-tests"):
-        assert task.id.split("/")[-1] not in body.lower(), task.id          # the example must not give away a task
+def test_only_one_skill_is_built_in_while_skills_are_added_one_at_a_time():
+    """2026-11-18: skills come in one at a time, each measured; the others' tasks stay for their turn."""
+    assert [s.name for s in SK.builtin_skills()] == ["xlsx"]
+    assert {"verify-before-done", "writing-tests", "debugging"} <= set(ST.TASKS)
 
 
 FIXES = {
@@ -213,6 +213,8 @@ ANSWERS = {   # fragments of a task's answer that a skill must never contain (fo
     "csv-total": ["4374.75", "1,250.50"], "discount": ["discount("], "slugify": ["slugify("], "stack": ["stack()"],
     "cart-coupon": ["coupon", "save10"], "config-keyerror": ["'port'", "config.json"], "leap-days": ["days_between"],
     "expenses": ["1,250.50", "expenses"], "marks": ["students", "maths"], "inventory-value": ["=b2*c2", "inventory"],
+    "design-shop": ["shop.xlsx", "flower", "fruit"], "add-rows": ["mango", "lily", "stock.xlsx"],
+    "delete-rows": ["quantity 0", "orchid", "stock.xlsx"],
 }
 
 
@@ -243,6 +245,18 @@ XLSX_REF = {
              "sm = wb.create_sheet('Summary'); sm.append(['Subject', 'Average'])\n"
              "sm.append(['Maths', '=AVERAGE(Students!B2:B4)']); sm.append(['Science', '=AVERAGE(Students!C2:C4)'])\n"
              "wb.save('marks.xlsx')\n",
+    "design-shop": "from openpyxl import Workbook\nwb = Workbook(); ws = wb.active; ws.title = 'Inventory'\n"
+                   "ws.append(['Item', 'Category', 'Quantity', 'Price (Rs)', 'Supplier'])\n"
+                   "for r in [['Rose', 'Flower', 40, 10, 'A'], ['Tulip', 'Flower', 15, 25, 'A'], ['Lily', 'Flower', 20, 15, 'B'],\n"
+                   "          ['Apple', 'Fruit', 50, 60, 'C'], ['Banana', 'Fruit', 120, 5, 'C'], ['Mango', 'Fruit', 30, 40, 'D']]:\n"
+                   "    ws.append(r)\nwb.save('shop.xlsx')\n",
+    "add-rows": "from openpyxl import load_workbook\nwb = load_workbook('stock.xlsx'); ws = wb['Stock']\n"
+                "ws.insert_rows(8, 2)\nws['A8'], ws['B8'], ws['C8'], ws['D8'] = 'mango', 'fruit', 30, 40\n"
+                "ws['A9'], ws['B9'], ws['C9'], ws['D9'] = 'lily', 'flower', 25, 15\n"
+                "ws['C10'] = '=SUM(C2:C9)'\nwb.save('stock.xlsx')\n",
+    "delete-rows": "from openpyxl import load_workbook\nwb = load_workbook('stock.xlsx'); ws = wb['Stock']\n"
+                   "for r in range(ws.max_row - 1, 1, -1):\n    if ws.cell(r, 3).value == 0:\n        ws.delete_rows(r)\n"
+                   "ws.cell(ws.max_row, 3).value = f'=SUM(C2:C{ws.max_row - 1})'\nwb.save('stock.xlsx')\n",
     "inventory-value": "from openpyxl import load_workbook\nwb = load_workbook('inventory.xlsx'); ws = wb['Stock']\n"
                        "ws['D1'] = 'Value'\nfor r in (2, 3, 4):\n    ws[f'D{r}'] = f'=B{r}*C{r}'\nwb.save('inventory.xlsx')\n",
 }
@@ -266,6 +280,31 @@ def test_a_total_written_as_a_number_fails_the_expenses_task(tmp_path):
     P.prepare(task, ws)
     (ws.parent / "ref.py").write_text(XLSX_REF["expenses"].replace("'=SUM(C2:C5)'", "4374.75"), encoding="utf-8")
     subprocess.run([sys.executable, str(ws.parent / "ref.py")], cwd=ws, check=True, timeout=60)
+    assert not P.grade(task, ws).passed
+
+
+TRAPS = {   # what a small model typically does wrong: each must fail the hidden check
+    "add-rows": "from openpyxl import load_workbook\nwb = load_workbook('stock.xlsx'); ws = wb['Stock']\n"
+                "ws.append(['mango', 'fruit', 30, 40]); ws.append(['lily', 'flower', 25, 15])\nwb.save('stock.xlsx')\n",
+    "delete-rows": "from openpyxl import load_workbook\nwb = load_workbook('stock.xlsx'); ws = wb['Stock']\n"
+                   "for r in range(2, ws.max_row):\n    if ws.cell(r, 3).value == 0:\n"
+                   "        for c in range(1, 5):\n            ws.cell(r, c).value = None\nwb.save('stock.xlsx')\n",
+    "design-shop": "from openpyxl import Workbook\nwb = Workbook(); ws = wb.active\n"
+                   "ws.append(['Item', 'Category', 'Quantity', 'Price'])\n"
+                   "for r in [['Rose', 'Flower', '40', '10'], ['Tulip', 'Flower', '15', '25'], ['Lily', 'Flower', '20', '15'],\n"
+                   "          ['Apple', 'Fruit', '50', '60'], ['Banana', 'Fruit', '120', '5'], ['Mango', 'Fruit', '30', '40']]:\n"
+                   "    ws.append(r)\nwb.save('shop.xlsx')\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(TRAPS))
+def test_the_usual_small_model_mistakes_fail(name, tmp_path):
+    """Appending below the Total, blanking cells instead of deleting rows, numbers stored as text."""
+    task = next(t for t in ST.for_skill("xlsx") if t.id.endswith(name))
+    ws = tmp_path / "task"
+    P.prepare(task, ws)
+    (ws.parent / "trap.py").write_text(TRAPS[name], encoding="utf-8")
+    subprocess.run([sys.executable, str(ws.parent / "trap.py")], cwd=ws, check=True, timeout=60)
     assert not P.grade(task, ws).passed
 
 
