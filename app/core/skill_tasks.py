@@ -186,7 +186,59 @@ DEBUG = [
           "    assert days_between(a, b) == want, (a, b, days_between(a, b), want)\n"),
 ]
 
-TASKS: dict[str, list[Task]] = {"verify-before-done": VERIFY, "writing-tests": TESTS, "debugging": DEBUG}
+_OPEN = "import sys\nfrom openpyxl import load_workbook\n"
+
+XLSX = [
+    _task("xlsx", "expenses",
+          "Create expenses.xlsx from expenses.csv: one sheet named Expenses with the columns Date, Item, Amount, the "
+          "rows from the CSV, and a Total row at the bottom whose Amount is a SUM formula.",
+          {"expenses.csv": "date,item,amount\n2026-11-01,chai,40\n2026-11-02,laptop stand,\"1,250.50\"\n"
+                           "2026-11-03,notebook,85.25\n2026-11-04,headphones,\"2,999\"\n"},
+          _OPEN + "wb = load_workbook('expenses.xlsx')\n"
+          "assert wb.sheetnames == ['Expenses'], wb.sheetnames\n"
+          "ws = wb['Expenses']\n"
+          "assert [c.value for c in ws[1]][:3] == ['Date', 'Item', 'Amount'], [c.value for c in ws[1]]\n"
+          "amounts = [ws.cell(r, 3).value for r in range(2, 6)]\n"
+          "assert amounts == [40, 1250.5, 85.25, 2999], amounts\n"
+          "assert str(ws.cell(6, 1).value).strip().lower() == 'total', ws.cell(6, 1).value\n"
+          "f = str(ws.cell(6, 3).value).replace(' ', '').upper()\n"
+          "assert f in ('=SUM(C2:C5)', '=SUM(C$2:C$5)', '=SUM($C$2:$C$5)'), f\n"),
+    _task("xlsx", "marks",
+          "Make marks.xlsx with a sheet Students (columns Name, Maths, Science) for Asha 91 84, Ravi 78 88 and "
+          "Meena 85 79, and a sheet Summary that shows the average of Maths and of Science as formulas that use the "
+          "Students sheet.",
+          {},
+          _OPEN + "wb = load_workbook('marks.xlsx')\n"
+          "assert set(wb.sheetnames) >= {'Students', 'Summary'}, wb.sheetnames\n"
+          "st = wb['Students']\n"
+          "rows = [[c.value for c in r][:3] for r in st.iter_rows(min_row=1, max_row=4)]\n"
+          "assert rows[0] == ['Name', 'Maths', 'Science'], rows\n"
+          "assert sorted(rows[1:]) == sorted([['Asha', 91, 84], ['Ravi', 78, 88], ['Meena', 85, 79]]), rows\n"
+          "fs = [str(c.value).replace(' ', '').upper() for r in wb['Summary'].iter_rows() for c in r\n"
+          "      if isinstance(c.value, str) and c.value.startswith('=')]\n"
+          "assert any('AVERAGE(STUDENTS!B2:B4)' in f.replace('$', '') for f in fs), fs\n"
+          "assert any('AVERAGE(STUDENTS!C2:C4)' in f.replace('$', '') for f in fs), fs\n"),
+    _task("xlsx", "inventory-value",
+          "In inventory.xlsx add a column Value (Qty times Price) as a formula for every item row, with the header "
+          "Value. Keep everything else in the file as it is.",
+          {},
+          _OPEN + "wb = load_workbook('inventory.xlsx')\n"
+          "ws = wb['Stock']\n"
+          "assert [c.value for c in ws[1]][:4] == ['Item', 'Qty', 'Price', 'Value'], [c.value for c in ws[1]]\n"
+          "assert ws['A2'].value == 'pen' and ws['B3'].value == 4 and ws['C4'].value == 900\n"
+          "assert ws['F1'].value == 'checked by: Asha'\n"
+          "for r in (2, 3, 4):\n"
+          "    f = str(ws.cell(r, 4).value).replace(' ', '').upper().replace('$', '')\n"
+          "    assert f in (f'=B{r}*C{r}', f'=C{r}*B{r}'), (r, f)\n"
+          "assert ws.max_row == 4, ws.max_row\n",
+          ) ,
+]
+XLSX[2].extra["setup"] = ("from openpyxl import Workbook\nwb = Workbook()\nws = wb.active\nws.title = 'Stock'\n"
+                          "ws.append(['Item', 'Qty', 'Price'])\nws.append(['pen', 10, 100])\nws.append(['book', 4, 250])\n"
+                          "ws.append(['bag', 1, 900])\nws['F1'] = 'checked by: Asha'\nwb.save('inventory.xlsx')\n")
+
+TASKS: dict[str, list[Task]] = {"verify-before-done": VERIFY, "writing-tests": TESTS, "debugging": DEBUG,
+                                "xlsx": XLSX}
 
 
 def for_skill(name: str) -> list[Task]:

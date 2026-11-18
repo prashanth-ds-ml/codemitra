@@ -302,7 +302,9 @@ def turn_skills(skills: list[Skill], request: str, phase: str) -> list[Skill]:
     first, at most NOTE_MAX_SKILLS."""
     if phase not in LOADED_PHASES:
         return []
-    text = " " + " ".join(_WORD.findall((request or "").lower())) + " "
+    words = _WORD.findall((request or "").lower())
+    # "expenses.xlsx" also counts as "expenses" and "xlsx", so a file name picks its skill
+    text = " " + " ".join(words + [p for w in words if "." in w for p in w.split(".") if p]) + " "
     matched = [s for s in skills if any(f" {w} " in text for w in s.triggers)]
     always = [s for s in skills if s.when == "change" and phase == "make_change" and s not in matched]
     return (matched + always)[:NOTE_MAX_SKILLS]

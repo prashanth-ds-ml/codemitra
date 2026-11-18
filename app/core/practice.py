@@ -425,6 +425,12 @@ def prepare(task: Task, ws: Path) -> None:
             f = ws / rel
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text(text, encoding="utf-8")
+        if task.extra.get("setup"):  # e.g. a real .xlsx to edit: made by a script, which is then removed
+            with tempfile.TemporaryDirectory(prefix="codemitra-setup-") as tmp:
+                f = Path(tmp) / "setup.py"
+                f.write_text(task.extra["setup"], encoding="utf-8")
+                subprocess.run([sys.executable, str(f)], cwd=str(ws), check=True, capture_output=True,
+                               timeout=PY_TIMEOUT_S)
         return
     if task.kind == "sql":
         (ws / "database.sqlite").write_bytes(Path(task.db).read_bytes())

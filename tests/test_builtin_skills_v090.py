@@ -208,7 +208,15 @@ def test_a_patch_for_the_reported_example_only_does_not_pass_the_leap_task(tmp_p
     assert not P.grade(task, ws).passed               # "fix the cause, not the symptom"
 
 
-@pytest.mark.parametrize("skill", ["verify-before-done", "writing-tests", "debugging"])
+ANSWERS = {   # fragments of a task's answer that a skill must never contain (found after two leaks slipped through)
+    "greet-cli": ["greet", "hello, "], "price-parser": ["1,00,000", "₹1,234"], "stats-empty": ["mean("],
+    "csv-total": ["4374.75", "1,250.50"], "discount": ["discount("], "slugify": ["slugify("], "stack": ["stack()"],
+    "cart-coupon": ["coupon", "save10"], "config-keyerror": ["'port'", "config.json"], "leap-days": ["days_between"],
+    "expenses": ["1,250.50", "expenses"], "marks": ["students", "maths"], "inventory-value": ["=b2*c2", "inventory"],
+}
+
+
+@pytest.mark.parametrize("skill", [s.name for s in SK.builtin_skills()])
 def test_no_skill_gives_away_a_task_of_any_skill(skill):
     body = (SK.builtin_dir() / skill / "SKILL.md").read_text(encoding="utf-8").lower()
     for tasks in ST.TASKS.values():
@@ -216,6 +224,54 @@ def test_no_skill_gives_away_a_task_of_any_skill(skill):
             name = task.id.split("/")[-1]
             files = [f for f in task.extra.get("files", {}) if not f.startswith("tests/")]
             assert name not in body and not any(f.lower() in body for f in files), (skill, task.id)
+            assert not [a for a in ANSWERS[name] if a in body], (skill, task.id, ANSWERS[name])
+
+
+def test_every_task_has_its_answer_fragments_listed():
+    assert {t.id.split("/")[-1] for ts in ST.TASKS.values() for t in ts} == set(ANSWERS)
+
+
+XLSX_REF = {
+    "expenses": "import csv\nfrom openpyxl import Workbook\nwb = Workbook(); ws = wb.active; ws.title = 'Expenses'\n"
+                "ws.append(['Date', 'Item', 'Amount'])\n"
+                "for r in csv.DictReader(open('expenses.csv', newline='')):\n"
+                "    a = float(r['amount'].replace(',', '')); ws.append([r['date'], r['item'], int(a) if a.is_integer() else a])\n"
+                "ws.append(['Total', None, '=SUM(C2:C5)'])\nwb.save('expenses.xlsx')\n",
+    "marks": "from openpyxl import Workbook\nwb = Workbook(); st = wb.active; st.title = 'Students'\n"
+             "for r in [['Name', 'Maths', 'Science'], ['Asha', 91, 84], ['Ravi', 78, 88], ['Meena', 85, 79]]:\n"
+             "    st.append(r)\n"
+             "sm = wb.create_sheet('Summary'); sm.append(['Subject', 'Average'])\n"
+             "sm.append(['Maths', '=AVERAGE(Students!B2:B4)']); sm.append(['Science', '=AVERAGE(Students!C2:C4)'])\n"
+             "wb.save('marks.xlsx')\n",
+    "inventory-value": "from openpyxl import load_workbook\nwb = load_workbook('inventory.xlsx'); ws = wb['Stock']\n"
+                       "ws['D1'] = 'Value'\nfor r in (2, 3, 4):\n    ws[f'D{r}'] = f'=B{r}*C{r}'\nwb.save('inventory.xlsx')\n",
+}
+
+
+@pytest.mark.parametrize("task", ST.for_skill("xlsx"), ids=lambda t: t.id.split("/")[-1])
+def test_each_xlsx_check_fails_before_and_passes_a_correct_workbook(task, tmp_path):
+    ws = tmp_path / "task"
+    P.prepare(task, ws)
+    assert not P.grade(task, ws).passed
+    script = ws.parent / "ref.py"
+    script.write_text(XLSX_REF[task.id.split("/")[-1]], encoding="utf-8")
+    subprocess.run([sys.executable, str(script)], cwd=ws, check=True, timeout=60)
+    check = P.grade(task, ws)
+    assert check.passed, check.detail
+
+
+def test_a_total_written_as_a_number_fails_the_expenses_task(tmp_path):
+    task = next(t for t in ST.for_skill("xlsx") if t.id.endswith("expenses"))
+    ws = tmp_path / "task"
+    P.prepare(task, ws)
+    (ws.parent / "ref.py").write_text(XLSX_REF["expenses"].replace("'=SUM(C2:C5)'", "4374.75"), encoding="utf-8")
+    subprocess.run([sys.executable, str(ws.parent / "ref.py")], cwd=ws, check=True, timeout=60)
+    assert not P.grade(task, ws).passed
+
+
+def test_a_file_name_picks_its_skill():
+    xlsx = _skill("xlsx", ["xlsx", "excel"])
+    assert SK.turn_skills([xlsx], "add a Value column to inventory.xlsx", "make_change") == [xlsx]
 
 
 def test_the_hidden_check_is_never_inside_the_task_folder(tmp_path):
