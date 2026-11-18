@@ -253,6 +253,63 @@ PROMISE_NOTE = ("[CodeMitra: you said you would do it (\"{said}\"), but you only
                 "describe it again.]")
 CHANGE_PROMISE_NOTE = ("[CodeMitra: you said what you will do, but no file has been written or changed yet. Call the "
                        "tool now (write_file or edit_file), then run the tests.]")
+# E-143 (skill practice 2026-11-18, 9 of 12 xlsx runs): "I can't directly create an `.xlsx` file ... here is the code"
+# to a request to make one; and "I've created marks.xlsx" with no tool call. It can: it writes and runs Python
+_CANNOT = re.compile(r"\bi\s*(can'?t|cannot|can not|am unable to|'m unable to|am not able to|'m not able to)\s+"
+                     r"(directly\s+|actually\s+)?(create|make|write|generate|save|produce|edit|modify|build|"
+                     r"manipulate|open|run|execute)\b|\bi can only read\b", re.IGNORECASE)
+_CLAIMS_MADE = re.compile(r"\b(i'?ve|i have)\s+(now\s+|just\s+|successfully\s+)?(created|made|written|added|saved|"
+                          r"generated|built|updated|fixed|changed|edited)\b", re.IGNORECASE)
+CANT_NOTE = ("[CodeMitra: you can do this. Write a small Python script with write_file and run it with run_command "
+             "(install a library with `python -m pip install <name>` if it is missing). Never tell the user you cannot "
+             "create or change files. Do it now.]")
+NOTHING_WRITTEN_NOTE = ("[CodeMitra: your answer says it is done or cannot be done, but nothing was written or "
+                        "changed in this turn. Do it now with the tools (write_file / edit_file, then run_command or "
+                        "run_tests to check it).]")
+
+
+# E-144 (skill practice 2026-11-18, xlsx after E-143): it wrote build_expenses.py, never ran it, and answered
+# "Created `expenses.xlsx` ..." for a file that did not exist. An output file the answer names must exist
+_OUTPUT_FILE = re.compile(r"(?<![\w/.\\-])((?:[\w.-]+[/\\])*[\w-][\w.-]*\.(?:xlsx|xlsm|xls|csv|pdf|docx|pptx|json|txt|"
+                          r"md|html|png|jpg|jpeg|svg|sql|db|sqlite|zip))(?![\w.])", re.IGNORECASE)
+MISSING_NOTE = ("[CodeMitra: your answer names {files}, but {it} does not exist in the project. {hint}Run what makes "
+                "it (run_command), check that it exists and holds what was asked, then answer.]")
+
+
+def missing_outputs(text: str, root: Path, scripts: list[str] | None = None) -> list[str]:
+    """E-144: output files named in an answer that do not exist (anywhere in the project, by name)."""
+    found, out = [], []
+    for m in _OUTPUT_FILE.finditer(text or ""):
+        name = m.group(1).replace("\\", "/")
+        if name not in found:
+            found.append(name)
+    for name in found[:12]:
+        if (root / name).exists():
+            continue
+        base = Path(name).name
+        try:
+            hit = any(True for _ in zip(range(1), root.rglob(base)))
+        except OSError:
+            hit = False
+        if not hit:
+            out.append(name)
+    return out
+
+
+def missing_note(files: list[str], scripts: list[str]) -> str:
+    shown = ", ".join(f"`{f}`" for f in files[:4])
+    hint = (f"You wrote {', '.join(f'`{s}`' for s in scripts[:2])} but did not run it. " if scripts else "")
+    return MISSING_NOTE.format(files=shown, it="it" if len(files) == 1 else "they", hint=hint)
+
+
+def says_cannot(text: str) -> bool:
+    """E-143: the answer says CodeMitra cannot create / write / change something (it can)."""
+    return bool(_CANNOT.search(text or ""))
+
+
+def claims_made(text: str) -> bool:
+    """E-143: the answer says it created or changed something ("I've created marks.xlsx")."""
+    return bool(_CLAIMS_MADE.search(text or ""))
 
 
 def promised(text: str) -> str:
@@ -1140,6 +1197,15 @@ class ChatSession:
                 res = self._decide(messages, res, len(messages) - 1, asks_search, retry=True)
             finally:
                 messages[:] = [m for m in messages if m is not note]
+        if not self.phase_request and says_cannot(res.text) and asks_change(self._prev_user_full or user):
+            # E-143: "I can't directly create an .xlsx file" to a request to make one: it can (a script it runs)
+            self.rec.write("cannot", turn=self.turn_no, step=res.steps, text=(res.text or "")[-300:])
+            note = HumanMessage(content=CANT_NOTE)
+            messages.append(note)
+            try:
+                res = self._decide(messages, res, len(messages) - 1, asks_search, retry=True)
+            finally:
+                messages[:] = [m for m in messages if m is not note]
         if not self.phase_request:
             return res  # talked: one call
         asked = name = self.phase_request["name"]
@@ -1449,6 +1515,7 @@ class ChatSession:
         runaway_retried = False
         empty_nudged = False
         promise_nudged = False
+        missing_nudged = False  # E-144: an answer naming an output file that does not exist, once per turn
         for step in range(1, max_steps + 1):
             if self.cancelled:
                 res.stopped, res.stop_reason = True, "cancelled (timed out)"
@@ -1578,13 +1645,26 @@ class ChatSession:
                 messages.append(HumanMessage(content=EMPTY_ANSWER_NOTE))
                 continue
             if (not reply.tool_calls and not promise_nudged and not self.deciding and not last and step < max_steps
-                    and self.last_phase == "make_change" and not res.journal and promises_action(streamed.text)):
-                # E-133: in the change phase it said "I'll create query.sql now" and stopped with nothing written
+                    and self.last_phase == "make_change" and not res.journal
+                    and (promises_action(streamed.text) or claims_made(streamed.text) or says_cannot(streamed.text))):
+                # E-133: in the change phase it said "I'll create query.sql now" and stopped with nothing written;
+                # E-143: or "I've created marks.xlsx" / "I can't create files" with nothing written
                 promise_nudged = True
-                self.rec.write("promise", turn=self.turn_no, step=step, text=(streamed.text or "")[-300:])
+                kind = "promise" if promises_action(streamed.text) else "nothing_written"
+                self.rec.write(kind, turn=self.turn_no, step=step, text=(streamed.text or "")[-300:])
                 messages.append(AIMessage(content=reply.content or streamed.text or ""))
-                messages.append(HumanMessage(content=CHANGE_PROMISE_NOTE))
+                messages.append(HumanMessage(content=CHANGE_PROMISE_NOTE if kind == "promise" else NOTHING_WRITTEN_NOTE))
                 continue
+            if (not reply.tool_calls and not missing_nudged and not self.deciding and not last and step < max_steps
+                    and self.last_phase == "make_change"):
+                gone = missing_outputs(streamed.text, self.ws.root)
+                if gone:  # E-144: "Created `expenses.xlsx`" with no such file (the script was written, not run)
+                    missing_nudged = True
+                    scripts = [Path(e["path"]).name for e in res.journal if str(e.get("path", "")).endswith(".py")]
+                    self.rec.write("missing_output", turn=self.turn_no, step=step, files=gone[:6])
+                    messages.append(AIMessage(content=reply.content or streamed.text or ""))
+                    messages.append(HumanMessage(content=missing_note(gone, scripts)))
+                    continue
             messages.append(reply)
             if not reply.tool_calls:
                 res.text = streamed.text

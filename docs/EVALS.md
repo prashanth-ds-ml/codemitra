@@ -36,6 +36,15 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## xlsx after E-143 and E-144 (2026-11-18 12:25, laptop, qwen3.5:4b at 32K, 2 repeats)
+| | Without the skill | With it |
+|---|---|---|
+| before the fixes | 0/6 | 0/6 |
+| after E-143 (no more "I can't") | 0/6 | 0/6 (writes in 9/12, never runs it) |
+| after E-144 (a named output file must exist) | **2/6** | **3/6** (margin +-40) |
+
+Per task with the skill: marks 2/2, expenses 1/2, inventory-value 0/2 (an existing file edited by a script that was not run: E-144 cannot see that, the file exists). Median time 17 s -> 24 s. The fixes mattered more than the skill again.
+
 ## Built-in skills after E-142, 2 repeats (2026-11-18 ~11:00, laptop, qwen3.5:4b at 32K, caf0dc7)
 `codemitra practice --skill <name> --repeats 2`, results/practice.jsonl.
 
