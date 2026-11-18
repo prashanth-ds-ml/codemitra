@@ -36,6 +36,20 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Built-in skills after E-142, 2 repeats (2026-11-18 ~11:00, laptop, qwen3.5:4b at 32K, caf0dc7)
+`codemitra practice --skill <name> --repeats 2`, results/practice.jsonl.
+
+| Skill | Tokens when loaded | Passed without -> with | Margin | Checked after its last change | Verdict |
+|---|---|---|---|---|---|
+| writing-tests | 586 | 4/6 -> **6/6** (discount 1/2 -> 2/2, slugify 1/2 -> 2/2) | +-16 | 6/6 -> 6/6 | **keep**: the gain is beyond the margin |
+| verify-before-done | 399 (every change turn) | 6/8 -> 6/8 | +-30 | 5/8 -> 4/8 | no gain: not shipped as `when: change` |
+| debugging | 506 | 4/6 -> 4/6 (leap-days 0/2 both) | +-38 | 2/6 -> 2/6 | no gain yet |
+| xlsx | 576 | 0/6 -> 0/6 | +-16 | 0/1 -> 1/2 | blocked by E-143, no verdict |
+
+xlsx: in 9 of 12 runs the decide call answered "I can't directly create an `.xlsx` file" and offered code to copy
+(it can: it writes and runs Python); one run claimed "I've created marks.xlsx" with no tool call. The inventory runs
+worked through a script but put the column in the wrong place. The time cost of writing-tests: median 26 s -> 32 s.
+
 ## Built-in skills, first with / without run (2026-11-18, laptop, qwen3.5:4b at 32K, 1 repeat, e579a4e)
 `codemitra practice --skill <name>` (results/practice.jsonl). Before E-142.
 
