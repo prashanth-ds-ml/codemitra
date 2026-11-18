@@ -1226,13 +1226,12 @@ class ChatSession:
                            from_text=True)
         if not self.phase_request and says_cannot(res.text) and asks_change(self._prev_user_full or user):
             # E-143: "I can't directly create an .xlsx file" to a request to make one: it can (a script it runs)
+            # E-147 (xlsx ladder 2026-11-18): deciding again after the nudge picked a web search for "how to create
+            # excel with python" and said "I can't" again; a clear change request goes straight to the change phase
             self.rec.write("cannot", turn=self.turn_no, step=res.steps, text=(res.text or "")[-300:])
-            note = HumanMessage(content=CANT_NOTE)
-            messages.append(note)
-            try:
-                res = self._decide(messages, res, len(messages) - 1, asks_search, retry=True)
-            finally:
-                messages[:] = [m for m in messages if m is not note]
+            self.phase_request = {"name": "make_change", "args": {"what": (user or "")[:300]}, "id": "after-cannot"}
+            self.rec.write("phase", turn=self.turn_no, step=res.steps, name="make_change", args={}, after_cannot=True)
+            go_note = "\n".join(x for x in (go_note, CANT_NOTE) if x)
         if not self.phase_request:
             return res  # talked: one call
         asked = name = self.phase_request["name"]

@@ -34,14 +34,17 @@ def test_honest_or_unrelated_answers_are_not():
 
 
 def test_a_refusal_to_a_change_request_gets_one_nudge_and_the_work_is_done(tmp_path):
+    # E-147: no second decision (it picked a web search and said "I can't" again): straight to the change phase
     m = Heard(AIMessage(content=LIVE_CANT[0]),
-              AIMessage(content="", tool_calls=[tc("make_change", 1, what="create expenses.xlsx")]),
               AIMessage(content="", tool_calls=[tc("write_file", 2, path="build_sheet.py", content="print('ok')\n")]),
-              AIMessage(content="Wrote build_sheet.py."))
+              AIMessage(content="", tool_calls=[tc("run_command", 3, command="python build_sheet.py")]),
+              AIMessage(content="Ran build_sheet.py."))
     s = _session(tmp_path, m)
     s.phased(_msgs(ASK))
-    assert any(r["kind"] == "cannot" for r in _rows(s))
-    assert C.CANT_NOTE in m.heard[1]                      # the retry was told it can
+    rows = _rows(s)
+    assert any(r["kind"] == "cannot" for r in rows)
+    assert any(r["kind"] == "phase" and r.get("after_cannot") for r in rows) and s.last_phase == "make_change"
+    assert any(C.CANT_NOTE in str(x) for x in m.heard[1])   # the change phase was told it can
     assert (tmp_path / "build_sheet.py").is_file()
 
 
