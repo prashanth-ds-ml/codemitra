@@ -32,6 +32,35 @@ def ram_free_gb() -> float | None:
         return None
 
 
+@lru_cache(maxsize=1)
+def machine() -> dict:
+    """Stage 1.7: the machine a session ran on: OS, GPU (name, memory), CPU count, total RAM, local Ollama version.
+    Missing facts are empty strings / None, never an error. A Kaggle session also records `remote`."""
+    import os
+    import platform
+    out: dict = {"os": f"{platform.system()} {platform.release()}".strip(), "cpus": os.cpu_count(),
+                 "ram_gb": None, "gpu": "", "ollama_version": ""}
+    try:
+        import psutil
+        out["ram_gb"] = round(psutil.virtual_memory().total / 2**30, 1)
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            out["gpu"] = r.stdout.strip().splitlines()[0].strip() if r.stdout.strip() else ""
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        r = subprocess.run(["ollama", "--version"], capture_output=True, text=True, timeout=5)
+        words = (r.stdout + r.stderr).split()
+        out["ollama_version"] = next((w for w in reversed(words) if w[:1].isdigit()), "")
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return out
+
+
 def ollama_timings(reply) -> dict:
     """Prompt processing, generation and model-load time from Ollama's reply metadata (seconds; A5).
     A large `load_s` means Ollama (re)loaded the model for this call."""

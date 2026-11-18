@@ -560,6 +560,69 @@ def cmd_report(
 cli.command("report")(cmd_report)
 
 
+def cmd_trace(
+    action: str = typer.Argument("last", help="last | check | replay"),
+    paths: list[str] = typer.Argument(None, help="Records or folders (default: last: this project; check: the store; "
+                                                 "replay: one record file)."),
+    as_json: bool = typer.Option(False, "--json", help="check: print the audit as JSON."),
+    turn: int = typer.Option(0, "--turn", help="replay: which turn of the record (1 = first; default: the last)."),
+    folder: str = typer.Option("", "--folder", help="replay: the folder to check against the turn's start files."),
+    ctx: int = typer.Option(32768, "--ctx", help="replay: context for the model (the recorded one if smaller)."),
+) -> None:
+    """Stage 1: what the logs can answer. `last`: the 8 questions for the latest turn here; `check`: the audit of every
+    recorded turn (how many turns each question can be answered for); `replay`: check a folder against a turn's start
+    files and send its first model call again (same messages and tools, temperature 0)."""
+    from app.core import store
+    from app.core import trace_check as TC
+
+    if action == "replay":
+        from app.core import replay as R
+        if not paths or not pathlib.Path(paths[0]).is_file():
+            console.print(Text("trace replay <record file> [--turn N] [--folder F]", style="m.err"))
+            raise typer.Exit(2)
+        found = TC.turns(pathlib.Path(paths[0]))
+        if not found or not (0 <= turn <= len(found)):
+            console.print(Text(f"No turn {turn} in that record ({len(found)} turns).", style="m.err"))
+            raise typer.Exit(1)
+        t = found[turn - 1] if turn else found[-1]
+        console.print(Text(TC.format_turn(t), style="m.text"))
+        if "files" in t.start and folder:
+            chk = R.start_check(t.start["files"], folder)
+            console.print(Text(f"start files: {len(chk['same'])} same, {len(chk['differ'])} differ, "
+                               f"{len(chk['missing'])} missing, {len(chk['extra'])} extra"
+                               + (f" (differ: {', '.join(chk['differ'][:5])})" if chk["differ"] else ""), style="m.tool"))
+        call = R.first_call(paths[0], t)
+        if call is None:
+            console.print(Text("This turn's first model call is not in the trace: it cannot be replayed.", style="m.err"))
+            raise typer.Exit(1)
+        from app.llm import get_local_llm
+        llm = get_local_llm(str(call.get("model") or ""), temperature=0,
+                            num_ctx=min(ctx, int(call.get("num_ctx") or ctx)))
+        out = R.replay_first(paths[0], t, llm)
+        console.print(Text(f"recorded first call: {out.get('recorded')}\nreplayed first call: {out.get('replayed')}\n"
+                           f"same: {out.get('same')}", style="m.text"))
+        return
+    if action == "check":
+        files = TC.chat_files([pathlib.Path(p) for p in paths] if paths else [store.runs_root()])
+        rep = TC.check(files)
+        print(json.dumps(rep.to_json(), indent=2)) if as_json else console.print(Text(TC.format_report(rep), style="m.text"))
+        return
+    if action == "last":
+        files = TC.chat_files([pathlib.Path(p) for p in paths] if paths else [pathlib.Path.cwd() / ".codemitra" / "runs"])
+        found = [t for f in files for t in TC.turns(f)]
+        if not found:
+            console.print(Text("No recorded chat turn here.", style="m.err"))
+            raise typer.Exit(1)
+        last = max(found, key=lambda t: float(t.start.get("t") or 0))
+        console.print(Text(TC.format_turn(last), style="m.text"))
+        return
+    console.print(Text("trace: last | check", style="m.err"))
+    raise typer.Exit(2)
+
+
+cli.command("trace")(cmd_trace)
+
+
 RATE_HINT_EVERY = 5           # D-079: the 'worked? + / -' hint at most once in this many turns
 OFFLINE_KAGGLE = "no internet on this machine: Kaggle keeps running and is used again when you are back online"
 SESSION_RATING_MIN_TURNS = 3  # D-079: the 1-5 question at exit only after a real session

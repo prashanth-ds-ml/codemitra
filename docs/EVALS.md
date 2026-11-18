@@ -36,6 +36,23 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Logs audit baseline, Stage 1.1 (2026-11-18, `codemitra trace check`, the store, read only)
+How many recorded chat turns the logs can answer each of the 8 Stage 1 questions for (ROADMAP Stage 1). 226 turns in
+10 records (2026-11-06..17, mitra-try and brick-breaker; no friends' records pulled into the store yet).
+
+| # | Question | Answered | Main gaps |
+|---|---|---|---|
+| 1 | request | 0% | no session / spec / feature / task IDs (226); no request kind (46) |
+| 2 | model calls | 79% | no backend (46); calls not traced (27, all from 11-06/07, before traces) |
+| 3 | tool calls | 52% | no seconds per tool (109); cut output with no full copy (53) |
+| 4 | files | 0% | no files at turn start (226); no diff of CodeMitra's own change (37) |
+| 5 | claims | 11% | no claim row (201) |
+| 6 | used | 0% | skills / MCP / lessons not listed on the turn |
+| 7 | time + machine | 0% | no model / tools / wait split; no OS, GPU, Ollama version |
+| 8 | replay | 0% | no mistake tags; no start files |
+
+**All 8 answered: 0 of 226 turns (0%).** Stage 1 is done when new live turns score 100%.
+
 ## xlsx after E-143 and E-144 (2026-11-18 12:25, laptop, qwen3.5:4b at 32K, 2 repeats)
 | | Without the skill | With it |
 |---|---|---|

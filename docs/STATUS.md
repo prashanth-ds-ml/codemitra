@@ -1,6 +1,18 @@
-**2026-11-18: the plan is [ROADMAP.md](ROADMAP.md)** (Stage 1 next: core benchmark on qwen3.5:9b, then the finish gate and anti-loop ladder from Mingbird, [MINGBIRD_REFERENCE.md](MINGBIRD_REFERENCE.md)). Other plans are parked until their stage.
+**2026-11-18: the plan is [ROADMAP.md](ROADMAP.md)**, order revised the same day: 1 logs and traces, 2 spec-driven
+core (finish gate, ladder from [MINGBIRD_REFERENCE.md](MINGBIRD_REFERENCE.md)), 3 specs as the benchmark, 4 skills and
+existing MCP servers by trigger, 5 self-improvement. MongoDB (server, upload API, dashboard) parked.
 
 # Status
+
+**2026-11-18, Stage 1 (logs and traces) built, not committed; live check pending.** `codemitra trace check | last |
+replay` (`app/core/trace_check.py`); baseline audit 0 of 226 stored turns answer all 8 questions (EVALS). Records now
+carry: session_id + schema v2 on every row and call, spec / feature / task on turn_start, files at turn start;
+tool rows with seconds, output_chars, the full output in the trace (`tool_output`), MCP server / tool; `change` rows
+(diff, hashes; command-made files too), `claim` rows (claims, evidence, verdict); turn_end model_s / tools_s / wait_s,
+used {skills, mcp, lessons}, mistake tags (`app/core/turnfacts.py`, 10 fixed tags); machine (OS, GPU, RAM, Ollama
+version) on the session row; replay of a turn's first call (`app/core/replay.py`). 1,367 tests pass.
+**Next:** the live check (~10 turns, qwen3.5:9b, a demo project) must score 100% in `trace check`; it was not run
+because only 6.5 GB RAM was free (rule: 11-12 GB). Then commit, and the Stage 1 done line in ROADMAP.
 
 **2026-11-18 09:55, user left for the office. Committed locally, NOT pushed:** e579a4e (skills foundation + skills
 1-3), 6e57206 (xlsx skill + 3 tasks), c5520c4 (E-142: change requests no longer end as an explanation in the look

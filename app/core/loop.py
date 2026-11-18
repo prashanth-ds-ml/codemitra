@@ -39,6 +39,7 @@ COMPACT_AT = 0.75        # share of num_ctx at which old tool output is dropped
 FRESH_AT = 0.9           # share of num_ctx at which a fresh round starts (with a handoff note)
 KEEP_RECENT = 8          # messages always kept in full
 CALL_TIMEOUT_S = 600     # one model call; a stalled call counts as a failed call
+SCHEMA_VERSION = 2       # record rows: 2 = Stage 1 (session_id, spec ids, change / claim rows, time split, tags)
 
 
 @dataclass
@@ -100,6 +101,9 @@ class Recorder:
     def __init__(self, path: Path | None, *, traces: bool = True):
         self.path = path
         self.trace_path = (path.parent / "traces" / f"{path.stem}.jsonl") if (path and traces) else None
+        self.ctx: dict = {}  # Stage 1.2: added to every row and call (e.g. session_id); set by the owner
+        self.seen: list[str] = []  # kinds written since the owner last cleared it (a chat turn)
+        self.model_s = 0.0  # Stage 1.7: seconds of every traced model call, summed (the owner takes differences)
         self._prompts: set[str] = set()
         self._calls = 0
         self._last: list[str] = []  # fingerprints of the last call's input + reply
@@ -118,11 +122,25 @@ class Recorder:
     def write(self, kind: str, **data) -> None:
         if not self.path:
             return
-        self._append(self.path, {"t": time.time(), "kind": kind, "author": data.pop("author", "mitra"), **data})
+        self.seen.append(kind + ("_stall" if data.get("stalled") else ""))  # Stage 1.8: the turn's rows, for tags
+        self._append(self.path, {"t": time.time(), "kind": kind, "author": data.pop("author", "mitra"),
+                                 "v": SCHEMA_VERSION, **self.ctx, **data})
+
+    def tool_output(self, output: str, **meta) -> None:
+        """Stage 1.3: a tool output too long for its record row, kept in full in the trace. Never raises."""
+        if not self.trace_path:
+            return
+        try:
+            self._append(self.trace_path, {"t": time.time(), "kind": "tool_output", "v": SCHEMA_VERSION, **self.ctx,
+                                           **meta, "output": output})
+        except Exception:
+            pass
 
     def trace(self, messages: list, reply, *, tools: list | None = None, model: str = "", num_ctx: int = 0,
               seconds: float | None = None, thinking: str = "", **meta) -> None:
         """Save one model call in full. Never raises: a trace must not break a run."""
+        if seconds:
+            self.model_s += float(seconds)
         if not self.trace_path:
             return
         try:
@@ -148,7 +166,7 @@ class Recorder:
                 "t": time.time(), "kind": "call", "id": self._calls, "base": self._calls - 1 if grew else None,
                 "author": "mitra", "model": model, "num_ctx": num_ctx, "prompt": prompt, "new": new, "reply": out,
                 "seconds": round(seconds, 2) if seconds is not None else None, "tokens_in": meta_in,
-                "tokens_out": meta_out, "code_version": runinfo.code_version(),
+                "tokens_out": meta_out, "code_version": runinfo.code_version(), "v": SCHEMA_VERSION, **self.ctx,
                 **(runinfo.ollama_timings(reply) if reply is not None else {}), **meta})
             self._last = fps + ([_fp(out)] if out else [])
         except Exception:

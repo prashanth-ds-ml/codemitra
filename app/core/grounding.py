@@ -119,6 +119,54 @@ def unbacked(text: str, tools: list[tuple[str, bool, str]], changed: bool = Fals
     return out
 
 
+def claims(text: str, tools: list[tuple[str, bool, str]], changed: bool = False) -> list[dict]:
+    """Stage 1.5: every claim in the reply with its verdict against this turn's tool results.
+    {kind, text, verdict}: kind tests | changed | done | runs | checked; verdict true | false | unchecked.
+    Same rules as `unbacked`, but true claims are kept too, so the record says what was claimed and whether it held."""
+    evidence = " ".join(_findings(out) for _, ok, out in tools if ok).lower()
+    test_runs = [ok for name, ok, _ in tools if name == "run_tests"]
+    tested_ok, tests_failed = bool(test_runs and test_runs[-1]), bool(test_runs and not test_runs[-1])
+    ran = [ok for name, ok, _ in tools if name == "run_command"]
+    says_untested = bool(_UNTESTED.search(text or ""))
+    last_out = next((o for n, _, o in reversed(tools) if n == "run_tests"), "")
+    out = []
+
+    def add(kind: str, s: str, verdict: str) -> None:
+        out.append({"kind": kind, "text": s[:300], "verdict": verdict})
+
+    for s in _sentences(text or ""):
+        bare = re.sub(r"^[^A-Za-z]+", "", s)
+        success = _SUCCESS.search(s)
+        if success and not _NOT_YET.search(s) and not _HONEST.search(s[:success.start()]):
+            add("runs", s, "false" if tests_failed or (ran and not ran[-1]) else "true" if (tested_ok or (ran and ran[-1]))
+                else "unchecked")
+            continue
+        claim = _CHANGED.search(bare)
+        if claim and not _ASKS.search(s) and not _HONEST.search(bare[:claim.start()]):
+            add("changed", s, "true" if changed else "false")
+            continue
+        if _HONEST.search(s):
+            continue
+        if _TESTS.search(s):
+            counted = [n for n in _numbers(s) if re.search(rf"\b{re.escape(n)} passed\b", last_out)]
+            add("tests", s, "true" if (tested_ok or counted) else "false")
+            continue
+        if changed and _DONE.search(s) and not says_untested:
+            add("done", s, "true" if tested_ok else "false" if tests_failed else "unchecked")
+            continue
+        if _CHECKED.search(s):
+            add("checked", s, "true" if _backed(s, evidence) else "false")
+    return out
+
+
+def verdict(found: list[dict]) -> str:
+    """The turn's verdict: none (nothing claimed) | false (any claim false) | unchecked | true."""
+    if not found:
+        return "none"
+    kinds = {c["verdict"] for c in found}
+    return "false" if "false" in kinds else "unchecked" if "unchecked" in kinds else "true"
+
+
 def warning(claims: list[str]) -> str:
     """One line for the screen."""
     shown = "; ".join(f"“{c[:90]}{'…' if len(c) > 90 else ''}”" for c in claims[:MAX_SHOWN])

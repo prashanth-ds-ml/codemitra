@@ -23,6 +23,7 @@ from app.core import harness as H
 from app.core import loop as core_loop
 from app.core import signals as SIG
 from app.core import tools as T
+from app.core import turnfacts as TF
 from app.core.parse import for_model, text_tool_calls
 from app.core import runinfo
 from app.llm import STREAM_STALL_S, is_stalled, set_stall, stall_for
@@ -652,6 +653,7 @@ def is_tool_call_parse_error(exc: BaseException) -> bool:
     text = str(exc)
     return type(exc).__name__ == "ResponseError" and ("XML syntax error" in text or "tool call" in text.lower())
 MAX_STEPS = 40
+OUTPUT_CAP = 3000  # characters of a tool's output on its record row; the rest goes to the trace (Stage 1.3)
 
 EXTRA_SPECS = [
     {"name": "run_command", "description": "Run ONE command in the project folder (tests, git, pip). No pipes, "
@@ -781,6 +783,13 @@ class ChatSession:
         # every step of every turn, scrubbed, one file per day: follow a session live, replay it later (D-022)
         self.rec = core_loop.Recorder(self.ws.root / ".codemitra" / "runs" / f"chat-{time.strftime('%Y%m%d')}.jsonl",
                                       traces=traces)  # + full model calls for the fine-tune (D-041)
+        import uuid
+        self.session_id = uuid.uuid4().hex[:12]  # Stage 1.2: on every row and call of this session
+        self.rec.ctx["session_id"] = self.session_id
+        self.work = {"spec": "", "feature": "", "task": ""}  # Stage 1.2: what the turn belongs to (filled in Stage 2)
+        self._used = {"skills": [], "mcp": [], "lessons": []}  # Stage 1.6, per turn
+        self._snap_cache: dict = {}   # Stage 1.4: file hashes by (size, mtime), so a snapshot rereads only changes
+        self._last_end_wall = 0.0     # Stage 1.7: when the last turn ended (your time = the gap to the next start)
         self.turn_no = 0
         self.backend_kind = "laptop"  # laptop | remote: a remote that drops raises RemoteGone (D-062)
         self.gen_tps: float | None = None  # E-141: this machine's measured writing speed (tokens/s), last call
@@ -841,7 +850,8 @@ class ChatSession:
     def note_session(self, **info) -> None:
         """One row per chat session: model, context, memory fit, free RAM/VRAM, CodeMitra version."""
         from app.core import runinfo
-        self.rec.write("session", code_version=runinfo.code_version(), workspace=str(self.ws.root), **info)
+        self.rec.write("session", code_version=runinfo.code_version(), workspace=str(self.ws.root),
+                       **runinfo.machine(), **info)
 
     def label_turns(self, llm) -> int:
         """Must-have 9: at exit, the model labels the turns the rules left open (one call); returns how many it
@@ -888,13 +898,57 @@ class ChatSession:
         self.rec.write("signal", of_turn=of, signal=name, **{"author": "user", **info})  # the model's own labels: "mitra"
 
     def _start_row(self, user: str) -> dict:
-        """The turn_start fields every path shares (D-068 step 0 adds kind, path, backend, thinking, notes)."""
+        """The turn_start fields every path shares (D-068 step 0 adds kind, path, backend, thinking, notes).
+        Stage 1 also starts the turn's facts here: the project's files (for replay and command-made changes), the
+        time since the last turn ended (your time), the clocks for model and tool time, the used lists."""
         from app.core import runinfo
+        self.rec.seen = []
+        self._turn_tools_s, self._model_s0 = 0.0, self.rec.model_s
+        self._used = {"skills": [], "mcp": [], "lessons": []}
+        self._wait_s = round(time.time() - self._last_end_wall, 1) if self._last_end_wall else None
+        self._start_files = TF.snapshot(self.ws.root, self._snap_cache)
+        self._notes_version = SIG.notes_version(self.ws.root)
         return dict(turn=self.turn_no, mode=self.mode, user=str(user)[:2000], harness_version=self.harness.version,
                     model=str(getattr(self.llm, "model", "") or ""), num_ctx=self.num_ctx,
                     code_version=runinfo.code_version(), ram_free_gb=runinfo.ram_free_gb(), role=self.role,
                     request_kind=self.request_kind, path=self.path, backend=self.backend_kind,
-                    thinking=self.thinking, notes_version=SIG.notes_version(self.ws.root))
+                    thinking=self.thinking, notes_version=self._notes_version, files=self._start_files, **self.work)
+
+    def _end_facts(self, text: str, journal: list, *, last_test_ok: bool | None = None, stop_reason: str = "",
+                   outcome: str = "") -> dict:
+        """Stage 1.4-1.8, at turn end: a `change` row per changed file (tool writes with their diff, command-made
+        changes by hash), a `claim` row (what the reply claimed, the evidence, a verdict), and the turn_end fields:
+        model / tools / wait seconds, what was used, the mistake tags. Never raises: the record must not break a turn."""
+        try:
+            rows = TF.change_rows(journal, self.ws.root, getattr(self, "_start_files", None),
+                                  TF.snapshot(self.ws.root, self._snap_cache))
+            for r in rows:
+                self.rec.write("change", turn=self.turn_no, **r)
+            ran = [ok for n, ok, _ in self.turn_tools if n == "run_command"]
+            found = grounding.claims(text, self.turn_tools, changed=bool(rows)) if text.strip() else []
+            verdict = grounding.verdict(found)
+            if text.strip():
+                tests = [ok for n, ok, _ in self.turn_tools if n == "run_tests"]
+                self.rec.write("claim", turn=self.turn_no, claims=found, verdict=verdict,
+                               evidence={"changed": [r["rel"] for r in rows], "tests_run": len(tests),
+                                         "last_test_ok": tests[-1] if tests else None, "commands_run": len(ran),
+                                         "last_command_ok": ran[-1] if ran else None})
+            nv = getattr(self, "_notes_version", "none")
+            lessons = ([f"notes:{nv}"] if nv and nv != "none" else []) + \
+                ([f"harness:v{self.harness.version}"] if self.harness.version else [])
+            used = {"skills": sorted(set(self._used["skills"]) | set(getattr(self, "_skills_given", set()))),
+                    "mcp": list(self._used["mcp"]), "lessons": lessons}
+            asked = asks_change(self._prev_user_full) and self.request_kind != "question"
+            tags = TF.mistake_tags(claims_verdict=verdict, asked_change=asked, did_work=bool(rows) or any(ran),
+                                   last_test_ok=last_test_ok, tools=self.turn_tools, kinds=list(self.rec.seen),
+                                   stop_reason=stop_reason, outcome=outcome)
+            return dict(model_s=round(self.rec.model_s - getattr(self, "_model_s0", 0.0), 2),
+                        tools_s=round(getattr(self, "_turn_tools_s", 0.0), 2), wait_s=getattr(self, "_wait_s", None),
+                        used=used, tags=tags, changed_by_commands=[r["rel"] for r in rows if r["via"] == "command"])
+        except Exception as exc:  # noqa: BLE001
+            return {"facts_error": f"{type(exc).__name__}: {exc}"[:300]}
+        finally:
+            self._last_end_wall = time.time()
 
     def _new_turn(self, user: str) -> None:
         """Count a turn; if you asked the same thing again, the turn before gets a rephrase signal."""
@@ -977,6 +1031,7 @@ class ChatSession:
         end = dict(turn=self.turn_no, steps=0, stopped=False, reason="", text="", tokens_in=0, tokens_out=0,
                    ctx_used=0, seconds=round(seconds, 1), outcome=outcome, changed=[])
         end.update(info)  # e.g. choice, rounds, steps_passed, or the planner error as `reason`
+        end.update(self._end_facts(str(end.get("text") or ""), [], outcome=outcome))
         self.rec.write("turn_end", **end)
         self.request_kind, self.path = "", "loop"
 
@@ -1048,6 +1103,29 @@ class ChatSession:
             raise T.ToolError(f"The user declined the change to {rel}. Ask what they want instead.")
 
     def _run(self, name: str, args: dict, plan_runner) -> tuple[str, bool]:
+        """Run one tool, timed (Stage 1.3): its seconds go on its record row and into the turn's tool time."""
+        t = time.monotonic()
+        try:
+            return self._run_tool(name, args, plan_runner)
+        finally:
+            self._last_tool_s = round(time.monotonic() - t, 3)
+            self._turn_tools_s = getattr(self, "_turn_tools_s", 0.0) + self._last_tool_s
+
+    def _tool_row(self, step: int, name: str, args: dict, ok: bool, out: str, **extra) -> None:
+        """Stage 1.3: the record row of one tool call: its time, its output (the full text goes to the trace when the
+        row keeps only the first OUTPUT_CAP characters), and for MCP the server and tool."""
+        row = dict(turn=self.turn_no, step=step, name=name, args=args, ok=ok, output=out[:OUTPUT_CAP],
+                   output_chars=len(out), seconds=getattr(self, "_last_tool_s", 0.0), **extra)
+        if name == "mcp_call":
+            row.update(server=str(args.get("server") or ""), tool=str(args.get("tool") or ""))
+            self._used["mcp"].append(f"{row['server']}.{row['tool']}")
+        if name == "use_skill" and ok:
+            self._used["skills"].append(str(args.get("name") or ""))
+        if len(out) > OUTPUT_CAP:
+            self.rec.tool_output(out, turn=self.turn_no, step=step, name=name)
+        self.rec.write("tool", **row)
+
+    def _run_tool(self, name: str, args: dict, plan_runner) -> tuple[str, bool]:
         if self.mode in ("plan", "read-only") and name not in READ_ONLY_TOOLS:
             return f"✗ {name} is not available in plan mode (read-only). Describe the change instead.", False
         if self.allowed_tools is not None and name not in self.allowed_tools:  # the role's promise, enforced (E-055)
@@ -1339,8 +1417,7 @@ class ChatSession:
             self._touch_project(name, args)
         self.hooks.show(name, args, out, ok)
         self.turn_tools.append((name, ok, out))
-        self.rec.write("tool", turn=self.turn_no, step=1, name=name, args=args, ok=ok, output=out[:3000],
-                       from_decide=True)
+        self._tool_row(1, name, args, ok, out, from_decide=True)
         for i, m in enumerate(messages):
             if isinstance(m, ToolMessage) and m.tool_call_id == call_id:
                 messages[i] = ToolMessage(content=out + self._deep_progress(name, ok), tool_call_id=call_id)
@@ -1369,9 +1446,7 @@ class ChatSession:
         res.last_test_ok, res.last_test_summary = ok, summary
         self.hooks.show("run_tests", {"after_change": True}, out, ok)
         self.turn_tools.append(("run_tests", ok, out))
-        self.rec.write("tool", turn=self.turn_no, step=step, name="run_tests",
-                       args={"folder": folder} if folder else {}, ok=ok, output=out[:3000],
-                       after_change=True)
+        self._tool_row(step, "run_tests", {"folder": folder} if folder else {}, ok, out, after_change=True)
         self._last_auto = (out, ok)
         if ok:
             self._test_fails = 0
@@ -1486,7 +1561,9 @@ class ChatSession:
             self.rec.write("turn_end", turn=self.turn_no, steps=res.steps, stopped=True, reason=res.stop_reason,
                            text="", tokens_in=res.tokens_in, tokens_out=res.tokens_out, ctx_used=res.ctx_used,
                            seconds=round(time.monotonic() - t0, 1), outcome="kaggle_ended",
-                           changed=[e["path"] for e in res.journal], first_s=res.first_s)
+                           changed=[e["path"] for e in res.journal], first_s=res.first_s,
+                           **self._end_facts("", res.journal, last_test_ok=res.last_test_ok,
+                                             stop_reason=res.stop_reason, outcome="kaggle_ended"))
             self._remember_left(res.journal)
             self.turn_log.append({"no": self.turn_no, "user": str(user)[:300], "outcome": "kaggle_ended",
                                   "files": [e["path"] for e in res.journal]})
@@ -1496,7 +1573,10 @@ class ChatSession:
                            reason=f"interrupted ({type(exc).__name__})", text="", tokens_in=res.tokens_in,
                            outcome="interrupted" if isinstance(exc, KeyboardInterrupt) else "error",
                            tokens_out=res.tokens_out, seconds=round(time.monotonic() - t0, 1),
-                           changed=[e["path"] for e in res.journal], first_s=res.first_s)
+                           changed=[e["path"] for e in res.journal], first_s=res.first_s,
+                           **self._end_facts("", res.journal, last_test_ok=res.last_test_ok,
+                                             stop_reason=f"interrupted ({type(exc).__name__})",
+                                             outcome="interrupted" if isinstance(exc, KeyboardInterrupt) else "error"))
             if isinstance(exc, KeyboardInterrupt):
                 self.signal("interrupt", steps=res.steps)
             self._remember_left(res.journal)
@@ -1514,7 +1594,9 @@ class ChatSession:
                        text=res.text[:2000], tokens_in=res.tokens_in, tokens_out=res.tokens_out,
                        ctx_used=res.ctx_used, seconds=round(time.monotonic() - t0, 1), outcome=turn_outcome(res),
                        changed=[e["path"] for e in res.journal], first_s=res.first_s,
-                       **({**self.end_info, **self._explain_info(messages, res)} if self.end_info else {}))
+                       **({**self.end_info, **self._explain_info(messages, res)} if self.end_info else {}),
+                       **self._end_facts(res.text or "", res.journal, last_test_ok=res.last_test_ok,
+                                         stop_reason=res.stop_reason, outcome=turn_outcome(res)))
         self._remember_left(res.journal)
         self.turn_log.append({"no": self.turn_no, "user": str(user)[:300], "outcome": turn_outcome(res),
                               "files": [e["path"] for e in res.journal]})
@@ -1734,6 +1816,7 @@ class ChatSession:
                     stop = "cancelled (timed out)"
                     continue
                 refused = guard.before(name, args)
+                self._last_tool_s = 0.0  # Stage 1.3: stays 0 when the tool is refused or answered without running
                 if name in PHASE_NEXT.get(self.last_phase or "", ()) and self.path == "phased" and not refused:
                     # E-114 (Phase 1 score, B9): asked to change something, the 9B looked first, found the line,
                     # called make_change inside the look phase and was told it is "not available"
@@ -1765,7 +1848,7 @@ class ChatSession:
                     res.last_test_summary = (out.strip().splitlines() or [""])[0][:200]
                 self.hooks.show(name, args, out, ok)
                 self.turn_tools.append((name, ok, out))
-                self.rec.write("tool", turn=self.turn_no, step=step, name=name, args=args, ok=ok, output=out[:3000])
+                self._tool_row(step, name, args, ok, out)
                 messages.append(ToolMessage(content=out + self._deep_progress(name, ok) + self._nothing_to_read(name, out),
                                             tool_call_id=tc["id"]))
                 if ok and name in CHANGE_TOOLS:
@@ -1815,7 +1898,14 @@ class ChatSession:
             takes_step = "step" in inspect.signature(self.hooks.stream).parameters
         except (TypeError, ValueError):
             takes_step = False
-        return self.hooks.stream(chunks, step=step) if takes_step else self.hooks.stream(chunks)
+        t = time.monotonic()
+        out = self.hooks.stream(chunks, step=step) if takes_step else self.hooks.stream(chunks)
+        if getattr(out, "seconds", None) is None:  # Stage 1.2: every call has its time, whatever the screen hook gives
+            try:
+                out.seconds = round(time.monotonic() - t, 3)
+            except AttributeError:
+                pass
+        return out
 
     def _wrap_up(self, messages: list, res: TurnResult, reason: str) -> TurnResult:
         """The loop was cut short: one call without tools, so the user still hears what was done (E-024)."""

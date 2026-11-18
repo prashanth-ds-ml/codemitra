@@ -252,4 +252,4 @@ def test_every_chat_step_is_recorded_for_live_follow_up(tmp_path):
     C.ChatSession(workspace=tmp_path, llm=model, hooks=hooks).turn(msgs("what does the test check?"))
     rec = next((tmp_path / ".codemitra" / "runs").glob("chat-*.jsonl"))
     kinds = [_json.loads(line)["kind"] for line in rec.read_text(encoding="utf-8").splitlines()]
-    assert kinds == ["turn_start", "model", "tool", "model", "turn_end"]
+    assert kinds == ["turn_start", "model", "tool", "model", "claim", "turn_end"]  # Stage 1.5: the claim row
