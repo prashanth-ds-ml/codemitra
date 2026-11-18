@@ -9,6 +9,8 @@ Plan v2 (2026-11-05, D-017); v1 is in [archive/PLAN-v1-2026-10-24.md](archive/PL
 
 **Progress:** Before starting 4/4 · M0-M7 0/8
 
+**2026-11-18: superseded by [ROADMAP.md](ROADMAP.md), the one plan (four stages: reliable core, bigger work, skills and MCP, self-improvement). The list below is history.**
+
 ## Next up: priority order (agreed with the user 2026-11-07)
 Work top to bottom. Each line points to its plan; the milestone lists below keep the detail.
 

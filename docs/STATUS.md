@@ -1,3 +1,5 @@
+**2026-11-18: the plan is [ROADMAP.md](ROADMAP.md)** (Stage 1 next: core benchmark on qwen3.5:9b, then the finish gate and anti-loop ladder from Mingbird, [MINGBIRD_REFERENCE.md](MINGBIRD_REFERENCE.md)). Other plans are parked until their stage.
+
 # Status
 
 **2026-11-18 09:55, user left for the office. Committed locally, NOT pushed:** e579a4e (skills foundation + skills
