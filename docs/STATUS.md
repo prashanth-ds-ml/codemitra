@@ -4,7 +4,12 @@ existing MCP servers by trigger, 5 self-improvement. MongoDB (server, upload API
 
 # Status
 
-**2026-11-18, Stage 1 (logs and traces) built, not committed; live check pending.** `codemitra trace check | last |
+**2026-11-18 evening: Stage 1 DONE.** Live check on Kaggle (qwen3.5 9B, 10 turns on a Trip_splitter copy): 10 of
+10 turns answer all 8 questions after E-148/F-140 (runs never set request_kind, had no traces); E-149/F-141 (claims
+about earlier turns no longer marked false). 1,371 tests pass. Kaggle stopped (18.5 h left). Committed locally, not
+pushed. I-38 embedded C parked for discussion. **Next:** Stage 2 plan (spec-driven core) for discussion before code.
+
+**Earlier the same day: Stage 1 (logs and traces) built.** `codemitra trace check | last |
 replay` (`app/core/trace_check.py`); baseline audit 0 of 226 stored turns answer all 8 questions (EVALS). Records now
 carry: session_id + schema v2 on every row and call, spec / feature / task on turn_start, files at turn start;
 tool rows with seconds, output_chars, the full output in the trace (`tool_output`), MCP server / tool; `change` rows

@@ -92,5 +92,6 @@ def replay_first(record: str | Path, turn, llm) -> dict:
     bound = llm.bind_tools(call["tools"]) if call.get("tools") else llm
     reply = bound.invoke(messages)
     was, now = first_tool_call(call.get("reply") or {}), first_tool_call(reply)
-    return {"ok": True, "recorded": was, "replayed": now, "same": was == now, "model": call.get("model"),
+    return {"ok": True, "recorded": was, "replayed": now, "same": was == now,
+            "same_tool": was.split("(")[0] == now.split("(")[0], "model": call.get("model"),
             "messages": len(messages)}

@@ -53,6 +53,23 @@ How many recorded chat turns the logs can answer each of the 8 Stage 1 questions
 
 **All 8 answered: 0 of 226 turns (0%).** Stage 1 is done when new live turns score 100%.
 
+**Live check (2026-11-18 afternoon, Kaggle T4, qwen3.5:latest 9B at 256K, phased, a copy of Trip_splitter, 10 turns:
+question, edit, run tests, new script + run, new test, "is everything done?", xlsx by script, thanks, conditional
+rename, "what did you change?").**
+
+| Run | Code | All 8 answered | Gap |
+|---|---|---|---|
+| 1 | 8f99c63 | 0 of 10 | request kind on every turn (E-148: runs never set it) |
+| 2 | + F-140 | **10 of 10 (100%)** | none |
+
+What the records showed (run 1): turn 2 tests failed after a docstring edit (a Streamlit test timed out) -> tag
+tests_fail; turns 4 and 7 made balances.csv / summary.xlsx with a script -> seen as command-made changes; model time
+5-54 s per turn, tools 0-14 s. Wrong verdicts found and fixed (E-149): true claims about earlier turns marked false
+(turns 3, 6, 10), script_not_run tagged after the script did run. Rule tags still miss intent: turn 9 ("rename eps
+if it exists, otherwise tell me") was tagged no_action although "it does not exist" was the right answer.
+Replay of 4 real first calls on the same model: same tool 2 of 4 (look_at_code, make_change), the exact call 0 of 4
+(other wording); turns 5 and 9 chose look_at_code where the record had read_file.
+
 ## xlsx after E-143 and E-144 (2026-11-18 12:25, laptop, qwen3.5:4b at 32K, 2 repeats)
 | | Without the skill | With it |
 |---|---|---|

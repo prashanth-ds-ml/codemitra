@@ -790,6 +790,8 @@ class ChatSession:
         self._used = {"skills": [], "mcp": [], "lessons": []}  # Stage 1.6, per turn
         self._snap_cache: dict = {}   # Stage 1.4: file hashes by (size, mtime), so a snapshot rereads only changes
         self._last_end_wall = 0.0     # Stage 1.7: when the last turn ended (your time = the gap to the next start)
+        self._session_changed: set[str] = set()  # Stage 1.5: files changed by any turn of this session
+        self._session_tests_ok = False           # the session's last test run passed and nothing changed since
         self.turn_no = 0
         self.backend_kind = "laptop"  # laptop | remote: a remote that drops raises RemoteGone (D-062)
         self.gen_tps: float | None = None  # E-141: this machine's measured writing speed (tokens/s), last call
@@ -925,7 +927,14 @@ class ChatSession:
             for r in rows:
                 self.rec.write("change", turn=self.turn_no, **r)
             ran = [ok for n, ok, _ in self.turn_tools if n == "run_command"]
-            found = grounding.claims(text, self.turn_tools, changed=bool(rows)) if text.strip() else []
+            earlier = {"changed": bool(self._session_changed), "tests_ok": self._session_tests_ok}
+            found = grounding.claims(text, self.turn_tools, changed=bool(rows), earlier=earlier) if text.strip() else []
+            tests_now = [ok for n, ok, _ in self.turn_tools if n == "run_tests"]
+            if tests_now:  # the session's last test result, and whether anything changed after it
+                self._session_tests_ok = bool(tests_now[-1])
+            elif rows:
+                self._session_tests_ok = False
+            self._session_changed |= {r["rel"] for r in rows}
             verdict = grounding.verdict(found)
             if text.strip():
                 tests = [ok for n, ok, _ in self.turn_tools if n == "run_tests"]

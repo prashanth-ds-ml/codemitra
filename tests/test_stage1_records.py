@@ -200,8 +200,53 @@ def test_replay_first_call_and_start_check(tmp_path):
             return call(tc("read_file", 9, path="tests/test_calc.py"))
 
     out = R.replay_first(rec, turn, Again())
-    assert out["same"] and out["recorded"].startswith("read_file(")
+    assert out["same"] and out["same_tool"] and out["recorded"].startswith("read_file(")
     chk = R.start_check(turn.start["files"], tmp_path)
     assert chk["same"] == ["tests/test_calc.py"] and not chk["differ"]
     (tmp_path / "tests" / "test_calc.py").write_text("changed", encoding="utf-8")
     assert R.start_check(turn.start["files"], tmp_path)["differ"] == ["tests/test_calc.py"]
+
+
+def test_a_benchmark_run_records_the_request_kind_and_traces(tmp_path):
+    """Live check 2026-11-18: runs (score / practice) left request_kind empty and had no traces."""
+    from app.core import harness as H
+    from app.core import score as S
+    project(tmp_path)
+    r = S.Runner(llm=Model(AIMessage(content="It tests add.")), harness=H.load(), num_ctx=8192,
+                 records=tmp_path / "records", arch="phased")
+    ws = tmp_path
+    s = r.session(ws, "case1")
+    r.respond(s, [r.system(ws=ws), msgs("what does the test check?")[-1]], ws)
+    assert s.request_kind
+    rec = tmp_path / "records" / "case1.jsonl"
+    assert TC.turns(rec)[0].start["request_kind"] == s.request_kind
+    assert (tmp_path / "records" / "traces" / "case1.jsonl").is_file()
+
+
+def test_claims_about_earlier_turns_are_not_false():
+    """Live check 2026-11-18 turns 3, 6, 10: true claims about an earlier turn were marked false."""
+    got = grounding.claims("The docstring I added to utils.py is complete.", [], changed=False,
+                           earlier={"changed": True, "tests_ok": True})
+    assert got[0]["verdict"] == "earlier"
+    got = grounding.claims("Yes, all tests are passing!", [], earlier={"changed": True, "tests_ok": True})
+    assert got[0]["verdict"] == "earlier" and grounding.verdict(got) == "true"
+    got = grounding.claims("Yes, all tests are passing!", [], earlier={"changed": True, "tests_ok": False})
+    assert got[0]["verdict"] == "false"
+
+
+def test_session_memory_backs_a_later_claim(tmp_path):
+    project(tmp_path)
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    s = _session(tmp_path, call(tc("read_file", 1, path="calc.py")),
+                 call(tc("edit_file", 2, path="calc.py", old="    return a - b", new="    return a + b")),
+                 AIMessage(content="I fixed add."), AIMessage(content="I fixed add in calc.py earlier."))
+    s.turn(msgs("fix add in calc.py"))
+    s.turn(msgs("did you fix it?"))
+    second = _rows(tmp_path, "claim")[-1]
+    assert second["claims"][0]["verdict"] == "earlier" and "false_done" not in _rows(tmp_path, "turn_end")[-1]["tags"]
+
+
+def test_script_not_run_tag_only_when_never_run():
+    base = dict(claims_verdict="none", asked_change=False, did_work=True, last_test_ok=None, kinds=["script_not_run"])
+    assert "script_not_run" in TF.mistake_tags(tools=[("write_file", True, "")], **base)
+    assert "script_not_run" not in TF.mistake_tags(tools=[("run_command", True, "ok")], **base)

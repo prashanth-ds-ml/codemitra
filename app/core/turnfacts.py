@@ -152,6 +152,8 @@ def mistake_tags(*, claims_verdict: str, asked_change: bool, did_work: bool, las
         tags.append("environment")
     if "missing_output" in kinds:
         tags.append("missing_output")
-    if "script_not_run" in kinds:
+    # the nudge rows say it happened during the turn; the tag is for how the turn ended (live check 2026-11-18:
+    # nudged, then the script ran and made the file)
+    if "script_not_run" in kinds and not any(ok for name, ok, _ in tools if name == "run_command"):
         tags.append("script_not_run")
     return tags

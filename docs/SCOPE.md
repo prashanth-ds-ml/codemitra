@@ -231,6 +231,11 @@ New ideas land here first, with a one-line impact guess. They move into PLAN.md 
   skills, so these three must be listed first or matched by request. Test: 3 practice tasks per format through the
   chat with a hidden check that opens the file; unit tests for the bundling. ~1 day. Impact: medium (a common
   non-coding ask from friends; first skills that make files, not code). Waiting for the user's go.
+- **I-38 Embedded C** (a friend of the user, 2026-11-18: "if it can do embedded C it has real potential to sell").
+  Today: no C checks (run_tests / has_tests / check_code are Python-only), no gcc on the laptop, never measured. Idea:
+  a 1-2 h probe (5 host-testable tasks: ring buffer, CRC16, debounce, UART frame parser, GPIO driver on mock
+  registers; hidden Unity-style tests with gcc + cppcheck; qwen3.5:9b, 3 tries), and a language-neutral finish gate in
+  Stage 2 (spec checks are commands: make test, ceedling, cppcheck). PARKED for discussion (user, 2026-11-18).
 - **I-37 Spec-driven development** (user, 2026-11-17: features, their test cases and must-haves written down, and counted: "how many features, how many tasks"). Plan: [SPEC_DRIVEN.md](SPEC_DRIVEN.md). S0 first: the D-065 planner and step runner are reached only by `/plan` since v0.7.0 (0 uses in real logs); a bigger build in the default chat gets a chat-text plan and "yes" starts the free-form change phase (E-125/E-126's path). Then a spec layer (features, acceptance criteria with checks, stable IDs), linked task records (replaces the separate I-32 estimate, §15 Phase 1), `codemitra status`, reading Spec Kit / Kiro files, measured with §15. ~5-7 days. Impact: high (small models do best on one feature, one task, its checks). Waiting for the user's go.
 
 ## Later (not milestones)

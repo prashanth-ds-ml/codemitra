@@ -41,6 +41,10 @@ the spec benchmark, on **qwen3.5:9b** (the model CodeMitra uses), 3 repeats.
 | 1.8 | Mistake tags: a fixed list (~10), set by rules; model labels marked as such |
 | 1.10 | Replay: one turn rebuilt from its records and rerun on the same start files |
 
+**Status 2026-11-18: done.** Live check 10 of 10 turns answer all 8 (EVALS). Known limits: replay re-sends the first
+call and checks the start files by hash (no file contents); rule tags miss intent (misread request, wrong file);
+the step runner's records (`/plan`, nights) get these facts in Stage 2.
+
 **Delivers:** task records tied to spec / feature / task IDs; `codemitra trace` to look them up.
 **Done when:** a test per question passes, and `trace check` scores 100% on ~10 new live turns (qwen3.5:9b, a demo
 project: a question, an edit, a new file, a failing test, a false "done", Kaggle if up).

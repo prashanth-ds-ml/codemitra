@@ -600,7 +600,7 @@ def cmd_trace(
                             num_ctx=min(ctx, int(call.get("num_ctx") or ctx)))
         out = R.replay_first(paths[0], t, llm)
         console.print(Text(f"recorded first call: {out.get('recorded')}\nreplayed first call: {out.get('replayed')}\n"
-                           f"same: {out.get('same')}", style="m.text"))
+                           f"same call: {out.get('same')} · same tool: {out.get('same_tool')}", style="m.text"))
         return
     if action == "check":
         files = TC.chat_files([pathlib.Path(p) for p in paths] if paths else [store.runs_root()])

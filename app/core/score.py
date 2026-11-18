@@ -243,6 +243,7 @@ class Runner:
                           traces=False)
         self.records.mkdir(parents=True, exist_ok=True)
         s.rec.path = self.records / f"{case_id}.jsonl"   # inside the store: kept for the coach, never mirrored
+        s.rec.trace_path = self.records / "traces" / f"{case_id}.jsonl"  # Stage 1: every call, for replay and audit
         s.backend_kind, s.thinking = self.backend, False
         s.read_outside = False  # a score case never reads outside its workspace: nobody is there to ask (review)
         box["s"] = s
@@ -265,6 +266,9 @@ class Runner:
         """One message through the chat's own entry, as the chosen architecture handles it. Returns (result, path).
         router: sorted by intent rules, then the one-call reply, the explainer or the working loop (D-068);
         one: the single conversational loop decides itself (D-071)."""
+        # Stage 1 (live check 2026-11-18): the chat sorts every request before the turn; so does a run, so its
+        # records say what kind of request each turn was
+        s.request_kind = classify(str(messages[-1].content), previous=previous, project_words=project_words(ws))
         if self.arch in ("one", "phased"):
             from app.core import threads
             root = self.threads_root if self.threads_root is not None else Path(tempfile.gettempdir()) / "no-threads"
@@ -274,7 +278,7 @@ class Runner:
             return s.converse(messages, notes=notes), "one"
         from app.core.intent import EVERYDAY
         text = str(messages[-1].content)
-        kind = classify(text, previous=previous, project_words=project_words(ws))
+        kind = s.request_kind
         if kind in EVERYDAY:
             return s.reply(messages, kind, self.llm), "reply"
         if kind == "question":
