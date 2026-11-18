@@ -5,6 +5,11 @@ the same format Claude Code uses. Two places are searched:
 
 * the project: ``skills/`` and ``.codemitra/skills/`` (``skill_dirs`` in the config), inside the workspace only
 * yours, in every project: ``~/.codemitra/skills/`` (a project skill wins over yours with the same name)
+* built in, in every project: ``app/builtin_skills/`` (shipped with CodeMitra; yours and the project's win a name)
+
+v0.9.0 (BUILD_V09 F-1, F-2): a small model rarely opens an optional skill by itself, so when a request matches a
+skill's ``triggers`` (or a skill says ``when: change``), CodeMitra puts the skill's text in that turn's phase note
+(``turn_skills`` / ``skill_note``), outside the cached system prompt. Each use is recorded.
 
 The system prompt carries only a short index (one line per skill, capped, E-134); the model opens a skill with the
 read-only ``use_skill`` tool, which reads yours too without widening the workspace read guard. Nothing in a skill is
@@ -41,7 +46,14 @@ class Skill:
     pre_approved_tools: list[str] = field(default_factory=list)
     auto_invoke: bool = False
     invocation_mode: str = "prompt"
-    source: str = "project"  # "project" | "user"
+    source: str = "project"  # "project" | "user" | "builtin"
+    triggers: tuple[str, ...] = ()  # v0.9.0: words in a request that make CodeMitra load this skill for the turn
+    when: str = ""                  # v0.9.0: "change" = loaded on every turn that changes files
+
+
+def builtin_dir() -> pathlib.Path:
+    """The skills shipped with CodeMitra (v0.9.0): every project has them."""
+    return pathlib.Path(__file__).resolve().parent / "builtin_skills"
 
 
 def user_dir() -> pathlib.Path:
@@ -111,7 +123,10 @@ def _skill_from_file(skill_file: pathlib.Path, path_text: str, source: str) -> S
     return Skill(name=name, description=description, path=path_text, args=args,
                  model_override=frontmatter.get("model_override"), pre_approved_tools=pre_approved,
                  auto_invoke=frontmatter.get("auto_invoke", False),
-                 invocation_mode=frontmatter.get("invocation_mode", "prompt"), source=source)
+                 invocation_mode=frontmatter.get("invocation_mode", "prompt"), source=source,
+                 triggers=tuple(w.strip().lower() for w in str(frontmatter.get("triggers", "")).split(",")
+                                if w.strip()),
+                 when=str(frontmatter.get("when", "")).strip().lower())
 
 
 def _project_skills(root: pathlib.Path, entries) -> list[Skill]:
@@ -157,17 +172,30 @@ def user_skills() -> list[Skill]:
     return out
 
 
-def discover(workspace: str, entries=None, include_user: bool = True) -> list[Skill]:
-    """Project skills (inside the workspace only), then yours from ~/.codemitra/skills; a project skill wins a name."""
+def builtin_skills() -> list[Skill]:
+    base = builtin_dir()
+    if not base.is_dir():
+        return []
+    out = []
+    for skill_file in sorted(base.glob("*/SKILL.md")):
+        skill = _skill_from_file(skill_file, skill_file.resolve().as_posix(), "builtin")
+        if skill:
+            out.append(skill)
+    return out
+
+
+def discover(workspace: str, entries=None, include_user: bool = True, include_builtin: bool = True) -> list[Skill]:
+    """Project skills (inside the workspace only), then yours (~/.codemitra/skills), then the built-in ones; the first
+    one with a name wins."""
     root = pathlib.Path(workspace).resolve()
     if entries is None:
         entries = ["skills", ".codemitra/skills"]
     if isinstance(entries, str):
         entries = [entries]
     skills = _project_skills(root, entries)
-    if include_user:
-        names = {s.name.lower() for s in skills}
-        skills += [s for s in user_skills() if s.name.lower() not in names]
+    for more in ((user_skills() if include_user else []) + (builtin_skills() if include_builtin else [])):
+        if more.name.lower() not in {s.name.lower() for s in skills}:
+            skills.append(more)
     return skills
 
 
@@ -196,8 +224,8 @@ def find(skills: list[Skill], query: str) -> Skill | None:
 
 def read_body(workspace: str, skill: Skill) -> str | None:
     """A skill's SKILL.md: project skills only from inside the workspace, yours only from ~/.codemitra/skills."""
-    if skill.source == "user":
-        base = user_dir().resolve()
+    if skill.source in ("user", "builtin"):
+        base = (user_dir() if skill.source == "user" else builtin_dir()).resolve()
         target = pathlib.Path(str(skill.path))
     else:
         base = pathlib.Path(workspace).resolve()
@@ -257,7 +285,41 @@ def use_skill(workspace: str, skills: list[Skill], name: str) -> str:
         return f"✗ Could not read the skill '{skill.name}'."
     if len(body) > MAX_SKILL_CHARS:
         body = body[:MAX_SKILL_CHARS] + f"\n… (cut at {MAX_SKILL_CHARS:,} characters)"
-    return f"Skill {skill.name} ({'yours' if skill.source == 'user' else 'this project'}):\n\n{body}"
+    return f"Skill {skill.name} ({SOURCE_TEXT.get(skill.source, skill.source)}):\n\n{body}"
+
+
+SOURCE_TEXT = {"user": "yours", "project": "this project", "builtin": "built in"}
+NOTE_SKILL_CHARS = 3500     # v0.9.0: one skill's text in a turn's note (a built-in skill is ~2,500)
+NOTE_MAX_SKILLS = 2         # at most this many skills loaded into one turn
+LOADED_PHASES = ("make_change", "look_at_code")
+_WORD = re.compile(r"[a-z0-9.+#-]+")
+_FRONT = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
+
+
+def turn_skills(skills: list[Skill], request: str, phase: str) -> list[Skill]:
+    """The skills to load into this turn (v0.9.0 F-2): rules, no model call. A trigger word or phrase in the request
+    picks a skill in the look and change phases; `when: change` skills come with every change phase. Request matches
+    first, at most NOTE_MAX_SKILLS."""
+    if phase not in LOADED_PHASES:
+        return []
+    text = " " + " ".join(_WORD.findall((request or "").lower())) + " "
+    matched = [s for s in skills if any(f" {w} " in text for w in s.triggers)]
+    always = [s for s in skills if s.when == "change" and phase == "make_change" and s not in matched]
+    return (matched + always)[:NOTE_MAX_SKILLS]
+
+
+def skill_note(workspace: str, chosen: list[Skill]) -> str:
+    """The text that goes into the turn's phase note for the chosen skills (front matter left out)."""
+    parts = []
+    for skill in chosen:
+        body = read_body(workspace, skill)
+        if not body:
+            continue
+        body = _FRONT.sub("", body, count=1).strip()
+        if len(body) > NOTE_SKILL_CHARS:
+            body = body[:NOTE_SKILL_CHARS].rstrip() + "\n…"
+        parts.append(f"[CodeMitra: skill `{skill.name}` fits this request. Follow it:]\n{body}")
+    return "\n\n".join(parts)
 
 
 # ─── Add / remove / import (S3) ──────────────────────────────────────────────

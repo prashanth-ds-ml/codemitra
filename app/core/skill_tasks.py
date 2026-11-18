@@ -1,0 +1,193 @@
+"""v0.9.0: practice tasks for the built-in skills (BUILD_V09 F-0). Each skill has a few small seeded projects and a
+request; a hidden check script (kept outside the task folder) decides. `codemitra practice --skill <name>` runs them
+without and with that one skill, so a skill is kept only when it helps.
+
+The tasks are ours (MIT). Each is easy to get almost right, so a model that never runs anything tends to fail it.
+"""
+from __future__ import annotations
+
+from app.core.practice import Task
+
+_SRC, _LIC = "codemitra", "MIT (CodeMitra's own)"
+
+
+def _task(skill: str, name: str, prompt: str, files: dict[str, str], check: str) -> Task:
+    return Task(id=f"skill/{skill}/{name}", kind="skill", source=_SRC, licence=_LIC, prompt=prompt, test=check,
+                extra={"files": files, "skill": skill})
+
+
+VERIFY = [
+    _task("verify-before-done", "greet-cli",
+          "Make greet.py print `Hello, <name>!` when run as `python greet.py <name>`, and `Hello, world!` when "
+          "it is run with no name.",
+          {"greet.py": "import sys\n\n# TODO: greet the person named on the command line\n"},
+          "import subprocess, sys\n"
+          "def run(*a):\n"
+          "    return subprocess.run([sys.executable, 'greet.py', *a], capture_output=True, text=True, timeout=20)"
+          ".stdout.strip()\n"
+          "assert run('Asha') == 'Hello, Asha!', run('Asha')\n"
+          "assert run() == 'Hello, world!', run()\n"),
+    _task("verify-before-done", "price-parser",
+          "Implement parse_price in prices.py so the tests in tests/test_prices.py pass.",
+          {"prices.py": "def parse_price(text: str) -> float:\n"
+                        "    \"\"\"'₹1,234.50' -> 1234.5, 'Rs. 99' -> 99.0, '1,00,000' -> 100000.0\"\"\"\n"
+                        "    raise NotImplementedError\n",
+           "tests/test_prices.py": "from prices import parse_price\n\n\n"
+                                   "def test_rupee_symbol():\n    assert parse_price('₹1,234.50') == 1234.5\n\n\n"
+                                   "def test_rs_prefix():\n    assert parse_price('Rs. 99') == 99.0\n\n\n"
+                                   "def test_indian_grouping():\n    assert parse_price('1,00,000') == 100000.0\n"},
+          "import sys; sys.path.insert(0, '.')\n"
+          "from prices import parse_price\n"
+          "cases = {'₹1,234.50': 1234.5, 'Rs. 99': 99.0, '1,00,000': 100000.0, ' ₹ 12,345 ': 12345.0, "
+          "'Rs.0.75': 0.75, 'INR 2,50,000.25': 250000.25}\n"
+          "for text, want in cases.items():\n"
+          "    got = parse_price(text)\n"
+          "    assert abs(got - want) < 1e-9, (text, got, want)\n"),
+    _task("verify-before-done", "stats-empty",
+          "mean() in stats.py crashes on an empty list. Make it return 0.0 for an empty list and keep everything else "
+          "working.",
+          {"stats.py": "def mean(xs):\n    return sum(xs) / len(xs)\n\n\n"
+                       "def median(xs):\n    s = sorted(xs)\n    n = len(s)\n    mid = n // 2\n"
+                       "    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2\n",
+           "tests/test_stats.py": "from stats import mean, median\n\n\n"
+                                  "def test_mean():\n    assert mean([1, 2, 3]) == 2\n\n\n"
+                                  "def test_median():\n    assert median([3, 1, 2]) == 2\n    "
+                                  "assert median([4, 1, 3, 2]) == 2.5\n"},
+          "import sys; sys.path.insert(0, '.')\n"
+          "from stats import mean, median\n"
+          "assert mean([]) == 0.0\n"
+          "assert mean([1, 2, 3]) == 2 and mean([2.5]) == 2.5\n"
+          "assert median([3, 1, 2]) == 2 and median([4, 1, 3, 2]) == 2.5\n"),
+    _task("verify-before-done", "csv-total",
+          "report.py should read sales.csv and print the total of the amount column, with 2 decimals, e.g. "
+          "`Total: 123.45`. Finish it.",
+          {"report.py": "import csv\n\n# TODO: print the total of the amount column of sales.csv\n",
+           "sales.csv": "date,item,amount\n2026-11-01,chai,40\n2026-11-02,laptop stand,\"1,250.50\"\n"
+                        "2026-11-03,notebook,85.25\n2026-11-04,headphones,\"2,999\"\n"},
+          "import subprocess, sys\n"
+          "out = subprocess.run([sys.executable, 'report.py'], capture_output=True, text=True, timeout=20)"
+          ".stdout.strip()\n"
+          "assert out.splitlines()[-1].strip() == 'Total: 4374.75', out\n"),
+]
+
+def _mutation_check(module: str, correct: str, mutants: list[str]) -> str:
+    """The hidden check for a "write tests" task: CodeMitra's tests run in a copy of the folder, first with the correct
+    module (they must pass, and there must be some), then with each broken version (each must make a test fail).
+    The module CodeMitra may have edited is replaced by ours, so changing the code does not help."""
+    return (
+        "import os, pathlib, shutil, subprocess, sys, tempfile\n"
+        f"MODULE = {module!r}\nCORRECT = {correct!r}\nMUTANTS = {mutants!r}\n"
+        "def run(source):\n"
+        "    with tempfile.TemporaryDirectory() as tmp:\n"
+        "        dst = pathlib.Path(tmp) / 'p'\n"
+        "        shutil.copytree('.', dst, ignore=shutil.ignore_patterns('__pycache__', '.codemitra', '.pytest_cache'))\n"
+        "        (dst / MODULE).write_text(source, encoding='utf-8')\n"
+        "        p = subprocess.run([sys.executable, '-m', 'pytest', '-q', '-p', 'no:cacheprovider'], cwd=dst,\n"
+        "                           capture_output=True, text=True, timeout=120)\n"
+        "        return p.returncode, p.stdout[-600:]\n"
+        "rc, out = run(CORRECT)\n"
+        "assert rc == 0 and ' passed' in out, 'tests do not pass on the correct code: ' + out\n"
+        "missed = [i for i, m in enumerate(MUTANTS) if run(m)[0] != 1]\n"
+        "assert not missed, f'tests did not catch broken version(s) {missed} of {len(MUTANTS)}'\n")
+
+
+_DISCOUNT = ("def discount(price, percent):\n"
+             "    \"\"\"price after `percent` off, rounded to 2 decimals. percent must be 0-100 and price >= 0,\n"
+             "    else ValueError.\"\"\"\n"
+             "    if not 0 <= percent <= 100:\n        raise ValueError('percent must be 0-100')\n"
+             "    if price < 0:\n        raise ValueError('price must be >= 0')\n"
+             "    return round(price * (1 - percent / 100), 2)\n")
+_SLUG = ("import re\n\n\ndef slugify(text):\n"
+         "    \"\"\"'  Hello, World!  ' -> 'hello-world': lower case, every run of other characters becomes one '-',\n"
+         "    no '-' at the ends.\"\"\"\n"
+         "    return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')\n")
+_STACK = ("class Stack:\n"
+          "    \"\"\"push(x); pop() and peek() raise IndexError when empty; peek() does not remove; len() is the size.\"\"\"\n"
+          "    def __init__(self):\n        self._items = []\n\n"
+          "    def push(self, x):\n        self._items.append(x)\n\n"
+          "    def pop(self):\n        if not self._items:\n            raise IndexError('pop from empty stack')\n"
+          "        return self._items.pop()\n\n"
+          "    def peek(self):\n        if not self._items:\n            raise IndexError('peek at empty stack')\n"
+          "        return self._items[-1]\n\n"
+          "    def __len__(self):\n        return len(self._items)\n")
+
+TESTS = [
+    _task("writing-tests", "discount",
+          "Add pytest tests for discount() in discount.py. Do not change discount.py.",
+          {"discount.py": _DISCOUNT},
+          _mutation_check("discount.py", _DISCOUNT, [
+              _DISCOUNT.replace("if not 0 <= percent <= 100:", "if not 0 <= percent <= 1000:"),
+              _DISCOUNT.replace("return round(price * (1 - percent / 100), 2)", "return price * (1 - percent / 100)"),
+              _DISCOUNT.replace("if price < 0:", "if price < -1000:")])),
+    _task("writing-tests", "slugify",
+          "Write tests for slugify() in text_utils.py. Do not change text_utils.py.",
+          {"text_utils.py": _SLUG},
+          _mutation_check("text_utils.py", _SLUG, [
+              _SLUG.replace("text.lower()", "text"),
+              _SLUG.replace("r'[^a-z0-9]+'", "r'[^a-z0-9]'"),
+              _SLUG.replace(".strip('-')", "")])),
+    _task("writing-tests", "stack",
+          "Add unit tests for the Stack class in stack.py. Do not change stack.py.",
+          {"stack.py": _STACK},
+          _mutation_check("stack.py", _STACK, [
+              _STACK.replace("raise IndexError('pop from empty stack')", "return None"),
+              _STACK.replace("return self._items[-1]", "return self._items.pop()"),
+              _STACK.replace("return len(self._items)", "return len(self._items) + 0 if self._items else 1")])),
+]
+
+_CART = ("PRICES = {'pen': 100, 'book': 250, 'bag': 900}\nCOUPONS = {'SAVE10': 0.10, 'SAVE25': 0.25}\n\n\n"
+         "def total(items, coupon=None):\n"
+         "    \"\"\"items: {name: quantity}. A coupon takes its percent off the whole order once.\"\"\"\n"
+         "    off = COUPONS.get(coupon, 0)\n"
+         "    amount = 0\n"
+         "    for name, qty in items.items():\n"
+         "        line = PRICES[name] * qty\n"
+         "        if off:\n            line = line * (1 - off)\n"
+         "        amount += line\n"
+         "    return round(amount * (1 - off), 2)\n")
+_DAYS = ("MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]\n\n\n"
+         "def _day_number(date):\n"
+         "    y, m, d = (int(x) for x in date.split('-'))\n"
+         "    days = y * 365 + y // 4 - y // 100 + y // 400\n"
+         "    days += sum(MONTH_DAYS[:m - 1])\n"
+         "    return days + d\n\n\n"
+         "def days_between(a, b):\n"
+         "    \"\"\"Days from date a to date b ('YYYY-MM-DD').\"\"\"\n"
+         "    return _day_number(b) - _day_number(a)\n")
+
+DEBUG = [
+    _task("debugging", "cart-coupon",
+          "The cart total is wrong with a coupon: 2 pens with SAVE10 should cost 180 but total() gives 162. Fix it.",
+          {"cart.py": _CART,
+           "tests/test_cart.py": "from cart import total\n\n\ndef test_no_coupon():\n"
+                                 "    assert total({'pen': 2, 'book': 1}) == 450\n"},
+          "import sys; sys.path.insert(0, '.')\nfrom cart import total\n"
+          "assert total({'pen': 2}, 'SAVE10') == 180, total({'pen': 2}, 'SAVE10')\n"
+          "assert total({'pen': 2, 'book': 1}) == 450\n"
+          "assert total({'bag': 1, 'book': 2}, 'SAVE25') == 1050\n"
+          "assert total({'pen': 1}, 'NOPE') == 100\n"),
+    _task("debugging", "config-keyerror",
+          "`python app.py` crashes with KeyError: 'port'. It should print `Serving on localhost:8080`. Fix it.",
+          {"app.py": "import json\n\nwith open('config.json') as f:\n    cfg = json.load(f)\n\n"
+                     "print(f\"Serving on {cfg['host']}:{cfg['port']}\")\n",
+           "config.json": "{\n  \"host\": \"localhost\",\n  \"PORT\": 8080\n}\n"},
+          "import json, subprocess, sys\n"
+          "out = subprocess.run([sys.executable, 'app.py'], capture_output=True, text=True, timeout=20)\n"
+          "assert out.stdout.strip() == 'Serving on localhost:8080', out.stdout + out.stderr\n"
+          "json.load(open('config.json'))  # still valid JSON\n"),
+    _task("debugging", "leap-days",
+          "days_between('2024-02-28', '2024-03-01') returns 1, but it should be 2. Fix days_between in dates.py.",
+          {"dates.py": _DAYS},
+          "import sys; sys.path.insert(0, '.')\nfrom dates import days_between\n"
+          "cases = {('2024-02-28', '2024-03-01'): 2, ('2026-03-01', '2026-03-05'): 4, ('2023-02-28', '2023-03-01'): 1,"
+          " ('2024-01-01', '2025-01-01'): 366, ('2025-01-01', '2026-01-01'): 365, ('2000-02-28', '2000-03-01'): 2,"
+          " ('1900-02-28', '1900-03-01'): 1}\n"
+          "for (a, b), want in cases.items():\n"
+          "    assert days_between(a, b) == want, (a, b, days_between(a, b), want)\n"),
+]
+
+TASKS: dict[str, list[Task]] = {"verify-before-done": VERIFY, "writing-tests": TESTS, "debugging": DEBUG}
+
+
+def for_skill(name: str) -> list[Task]:
+    return list(TASKS.get(name, []))

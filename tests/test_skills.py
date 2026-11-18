@@ -22,7 +22,7 @@ class TestSkillDiscovery:
             encoding="utf-8",
         )
 
-        discovered = skills.discover(str(tmp_path))
+        discovered = skills.discover(str(tmp_path), include_builtin=False)
 
         assert len(discovered) == 1
         assert discovered[0].name == "repo-analyzer"
@@ -32,7 +32,7 @@ class TestSkillDiscovery:
         outside = tmp_path.parent / "outside-skills"
         outside.mkdir(exist_ok=True)
 
-        discovered = skills.discover(str(tmp_path), [str(outside)])
+        discovered = skills.discover(str(tmp_path), [str(outside)], include_builtin=False)
 
         assert discovered == []
 
@@ -76,17 +76,11 @@ class TestSkillDiscovery:
 
         assert skills.read_body(str(tmp_path), skill) == body
 
-    def test_discovers_phase7_canonical_skills_from_repo(self):
-        registry = skills.discover(str(REPO_ROOT))
-        names = {skill.name for skill in registry}
-
-        assert {"coding", "debugging", "review", "testing", "markdown", "react", "fastapi", "langgraph", "rag", "docker", "huggingface"} <= names
-
-    def test_discovers_karapathy_skill_from_repo(self):
-        registry = skills.discover(str(REPO_ROOT))
-        names = {skill.name for skill in registry}
-
-        assert "karapathy" in names
+    def test_the_repo_has_no_old_skills_folder_and_the_built_in_ones_ship_with_the_code(self):
+        """v0.9.0 (BUILD_V09 F-1): the 23 local-codex skills were removed; built-in skills live in the package."""
+        assert not (REPO_ROOT / "skills").exists()
+        names = {skill.name for skill in skills.discover(str(REPO_ROOT)) if skill.source == "builtin"}
+        assert "verify-before-done" in names
 
 
 def test_phase7_templates_exist():

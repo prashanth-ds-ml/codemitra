@@ -220,6 +220,7 @@ class Runner:
     max_steps: int = 0                  # coding: 0 = the harness's chat_max_steps
     arch: str = "router"                # D-071: "router" (D-068 paths) or "one" (one conversational loop)
     threads_root: Path | None = None    # one CodeMitra's conversation memory for a case (a temp folder, seeded)
+    skills: list | None = None          # v0.9.0: the built-in skills a run may load (None: no skills, the "without" arm)
 
     def session(self, ws: Path, case_id: str):
         from app.core import chat as C
@@ -229,6 +230,15 @@ class Runner:
                         show=lambda *a: None, confirm=lambda *a: True, run_shell=_run_shell(ws),
                         web_search=lambda q: "web search is off in scoring", fetch_url=lambda u: "fetch is off in scoring",
                         mcp_find=lambda q: "no MCP in scoring", mcp_call=lambda *a: "no MCP in scoring")
+        if self.skills is not None:  # v0.9.0: the "with skills" arm loads them exactly as the chat does
+            from app import skills as SK
+            chosen_from = list(self.skills)
+            hooks.use_skill = lambda name: SK.use_skill(str(ws), chosen_from, name)
+
+            def _note(request, phase):
+                chosen = SK.turn_skills(chosen_from, request, phase)
+                return [x.name for x in chosen], SK.skill_note(str(ws), chosen)
+            hooks.skill_note = _note
         s = C.ChatSession(workspace=ws, llm=self.llm, hooks=hooks, num_ctx=self.num_ctx, harness=self.harness,
                           traces=False)
         self.records.mkdir(parents=True, exist_ok=True)

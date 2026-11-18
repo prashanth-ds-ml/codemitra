@@ -3,6 +3,8 @@ CodeMitra can be measured (and later learn) on hundreds of tasks instead of 23 c
 
     python  -> CodeMitra writes solution.py (and its own tests); the hidden tests (MBPP+ / HumanEval+ style) run against it
                in a separate process with a time limit
+    skill   -> v0.9.0: a small seeded project and a request; a hidden check script (kept outside the folder) inspects
+               what CodeMitra left. Run without and with one built-in skill to see whether the skill helps
     sql     -> CodeMitra writes query.sql for a SQLite database; it and the reference query run on a read-only connection
                and their result rows are compared (in order only when the reference sorts)
 
@@ -66,6 +68,45 @@ def _tail(text: str) -> str:
 
 
 # ── python ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def check_script(script: str, ws: Path, timeout_s: float = PY_TIMEOUT_S) -> Check:
+    """v0.9.0: a skill task's hidden check: a Python script run in the task folder (from a file outside it, so
+    CodeMitra never sees it); exit 0 passes. It runs with CodeMitra's own Python (openpyxl and the like are there)."""
+    t0 = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix="codemitra-check-") as tmp:
+        f = Path(tmp) / "hidden_check.py"
+        f.write_text(script, encoding="utf-8")
+        try:
+            p = subprocess.run([sys.executable, str(f)], cwd=str(ws), capture_output=True, text=True,
+                               timeout=timeout_s, encoding="utf-8", errors="replace")
+        except subprocess.TimeoutExpired:
+            return Check(False, f"the check took over {timeout_s:.0f} s", time.monotonic() - t0)
+    return Check(p.returncode == 0, "" if p.returncode == 0 else _tail(p.stdout + p.stderr), time.monotonic() - t0)
+
+
+CHANGE_TOOLS = {"edit_file", "write_file", "append_file", "make_dir"}
+CHECK_TOOLS = {"run_tests", "run_command"}
+
+
+def checked_after_last_change(record: Path) -> bool | None:
+    """v0.9.0: did the turn run a test or a command after its last file change? None when it changed nothing."""
+    import json
+    last_change, last_check = -1, -1
+    try:
+        lines = record.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for i, line in enumerate(lines):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("kind") == "tool" and r.get("name") in CHANGE_TOOLS and r.get("ok") is not False:
+            last_change = i
+        elif r.get("kind") == "tool" and r.get("name") in CHECK_TOOLS:
+            last_check = i
+    return None if last_change < 0 else last_check > last_change
+
 
 def check_python(solution: str, test: str, call: str = "", timeout_s: float = PY_TIMEOUT_S) -> Check:
     """Run the hidden `test` (plus `call`) against `solution` in a fresh Python process in a temporary folder."""
@@ -364,6 +405,7 @@ class Result:
     seconds: float = 0.0
     steps: int = 0
     run: int = 1            # which repeat (quick win 5: --repeats)
+    checked_last: bool | None = None  # v0.9.0: it ran a test or command after its last change (None: changed nothing)
 
     @property
     def misread(self) -> bool:
@@ -378,6 +420,12 @@ def order(tasks: list[Task]) -> list[Task]:
 
 def prepare(task: Task, ws: Path) -> None:
     ws.mkdir(parents=True, exist_ok=True)
+    if task.kind == "skill":  # v0.9.0: the seeded project
+        for rel, text in (task.extra.get("files") or {}).items():
+            f = ws / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(text, encoding="utf-8")
+        return
     if task.kind == "sql":
         (ws / "database.sqlite").write_bytes(Path(task.db).read_bytes())
 
@@ -385,6 +433,8 @@ def prepare(task: Task, ws: Path) -> None:
 def grade(task: Task, ws: Path) -> Check:
     """The hidden check on what CodeMitra left in the folder. SQL runs on the original database (CodeMitra's copy may have
     been changed)."""
+    if task.kind == "skill":
+        return check_script(task.test, ws)
     if task.kind == "python":
         f = ws / "solution.py"
         if not f.is_file():
@@ -417,7 +467,7 @@ def solve(task: Task, runner, timeout_s: float = TASK_TIMEOUT_S) -> Result:
             check = Check(False, f"{type(exc).__name__}: {str(exc)[:150]}")
         own_tests = any(p.name.startswith("test_") for p in ws.glob("*.py"))
     return Result(task.id, task.kind, task.split, check.passed, check.detail, own_tests, own_ok,
-                  round(time.monotonic() - t0, 1), steps)
+                  round(time.monotonic() - t0, 1), steps, checked_last=checked_after_last_change(s.rec.path))
 
 
 def results_path() -> Path:
@@ -445,6 +495,7 @@ def run(tasks: list[Task], runner, *, model: str = "", on_task=lambda r: None, r
            "harness_version": runner.harness.version, "model": model, "arch": runner.arch,
            "backend": runner.backend, "num_ctx": runner.num_ctx, "seconds": round(time.monotonic() - t0, 1),
            "repeats": max(1, repeats), "records": str(runner.records), "summary": summary(out),
+           "skills": sorted(x.name for x in (getattr(runner, "skills", None) or [])),  # v0.9.0: [] = no skills
            "results": [{**asdict(r), "misread": r.misread} for r in out]}
     path = results or results_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -549,3 +600,35 @@ def _reason(detail: str) -> str:
         if key in d:
             return {"rows, want": "wrong rows", "AssertionError": "wrong output"}.get(key, key)
     return d.splitlines()[-1][:60] if d else "unknown"
+
+
+def skill_compare(without: dict, with_: dict) -> str:
+    """v0.9.0 F-0: the same tasks without and with one skill: passes, "checked after its last change", time, per task."""
+    def stats(row):
+        rs = row.get("results") or []
+        n = len(rs)
+        passed = sum(1 for r in rs if r.get("passed"))
+        changed = [r for r in rs if r.get("checked_last") is not None]
+        checked = sum(1 for r in changed if r.get("checked_last"))
+        secs = sorted(r.get("seconds") or 0 for r in rs)
+        med = secs[len(secs) // 2] if secs else 0
+        return n, passed, checked, len(changed), med
+
+    a, b = stats(without), stats(with_)
+    name = ", ".join(with_.get("skills") or []) or "?"
+    lines = [f"skill {name}: without -> with",
+             f"  passed               {a[1]}/{a[0]} -> {b[1]}/{b[0]}  (margin about +-{margin(b[1], b[0]):.0f} points)",
+             f"  checked after change {a[2]}/{a[3]} -> {b[2]}/{b[3]}",
+             f"  median time          {a[4]:.0f}s -> {b[4]:.0f}s"]
+
+    def per_task(row):
+        out: dict[str, list[bool]] = {}
+        for r in row.get("results") or []:
+            out.setdefault(r["id"], []).append(bool(r.get("passed")))
+        return out
+
+    pa, pb = per_task(without), per_task(with_)
+    for tid in sorted(set(pa) | set(pb)):
+        x, y = pa.get(tid, []), pb.get(tid, [])
+        lines.append(f"  {tid.split('/')[-1]:22} {sum(x)}/{len(x)} -> {sum(y)}/{len(y)}")
+    return "\n".join(lines)

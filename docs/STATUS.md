@@ -1,5 +1,17 @@
 # Status
 
+**PAUSED 2026-11-17 (user travelling ~1 h), v0.9.0 skills in progress, NOT committed:** built-in skills ship in
+`app/builtin_skills/` (found in every project; project > yours > built-in); a matching skill's text is loaded into the
+turn's phase note by rules (`triggers`, `when: change`), never into the cached system prompt; the 23 local-codex
+skills removed (`git rm -r skills`); `codemitra practice --skill <name>` runs a skill's tasks without and with it
+(`app/core/skill_tasks.py`, hidden checks outside the folder, "checked after its last change" measure, mutation-graded
+test-writing tasks). Skills 1-3 written (verify-before-done, writing-tests, debugging; adapted from obra/superpowers,
+MIT, THIRD_PARTY_NOTICES.md). 30 skill tests pass; full suite not run yet. A two-leak bug was caught by a test (a
+skill's example was a practice task word for word): fixed, and the first A/B was restarted. **Running:** A/B of the
+three skills on qwen3.5:4b was STOPPED before the trip (heat in a bag); rerun it first (`codemitra practice --skill <name> --model qwen3.5:4b --ctx 32768 --repeats 2`, CODEMITRA_HOME=scratch), ~1.5-2 h on the laptop or faster on Kaggle. **Next:** read
+the A/B, keep or drop each skill, full suite, then xlsx / pdf / docx (from anthropics/skills, Apache-2.0),
+python-game, streamlit-app, long-document; the user may move later A/B runs to Kaggle (asked, not answered).
+
 **2026-11-17, evening: v0.8.9** (E-141/F-133): long files written as one silent tool call no longer stop the turn (Kaggle proxy keep-alives, laptop stall limit from measured speed, retry in parts). The notebook changed: a running Kaggle session keeps the old proxy until its next `kaggle start`. Open: SCOPE I-36 document skills + the two skill bugs it found (repo skills not shipped to users' projects; skill index cut at 800 chars) await the user's go; §15 plan awaits go; MongoDB vs other + Vercel vs Worker undecided.
 
 **2026-11-17, later: v0.8.8 PUBLISHED** (714b869, CI green after E-140/F-132: 2 guide tests needed a real key; tag v0.8.8 + pre-release). User messages saran directly (no #13 comment posted).

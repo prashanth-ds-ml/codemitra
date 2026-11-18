@@ -1072,6 +1072,12 @@ SKILLS_USAGE = ("Usage: `/skills` · `/skills show <name>` · `/skills add <fold
                 "[--replace]` · `/skills remove <name> [--project]` · `/skills import claude`")
 
 
+def _skill_note(workspace: str, skills: list[skills_registry.Skill], request: str, phase: str) -> tuple[list[str], str]:
+    """v0.9.0 F-2: the skills that fit this turn, by their triggers (no model call), and their text."""
+    chosen = skills_registry.turn_skills(skills, request, phase)
+    return [s.name for s in chosen], skills_registry.skill_note(workspace, chosen)
+
+
 def _build_skills_prompt(skills: list[skills_registry.Skill]) -> str:
     return skills_registry.format_prompt(skills)
 
@@ -2489,6 +2495,8 @@ def cmd_practice(
     arch: str = typer.Option("phased", "--arch", help="How CodeMitra handles a message (as `codemitra score`)."),
     repeats: int = typer.Option(1, "--repeats", help="Run every task this many times (3: pass^3 and the tasks that "
                                 "flip; one run moves a few tasks by noise)."),
+    skill: str = typer.Option("", "--skill", help="A built-in skill: run its tasks without it, then with it, and "
+                              "compare (v0.9.0: a skill is kept only when it helps)."),
 ) -> None:
     """Coding practice (D-078 step 5): CodeMitra solves small Python and SQL tasks in a fresh folder, writes its own
     tests, and a hidden check decides; results in results/practice.jsonl."""
@@ -2504,6 +2512,9 @@ def cmd_practice(
         except Exception as exc:  # noqa: BLE001 - offline, a bad download: said plainly
             say(f"could not build the practice set: {exc}", "m.err")
             raise typer.Exit(1)
+        return
+    if skill:
+        _practice_skill(skill, model, remote, ctx, arch, repeats, say)
         return
     if kind not in ("", "python", "sql") or split not in ("", "learn", "held_out"):
         raise typer.BadParameter("--kind python|sql, --split learn|held_out")
@@ -2534,6 +2545,44 @@ def cmd_practice(
     if vs:
         say("  " + vs, "m.tool")
     say(f"  kept in {P.results_path()} · records: {runner.records}", "m.faint")
+
+
+def _practice_skill(name: str, model: str, remote: bool, ctx: int, arch: str, repeats: int, say) -> None:
+    """v0.9.0 F-0: one built-in skill's tasks, without it and then with it (the same tasks, the same model)."""
+    from app import skills as SK
+    from app.core import harness as harness_mod
+    from app.core import practice as P
+    from app.core import score as S
+    from app.core import skill_tasks as ST
+    from app.core import store as store_mod
+
+    found = [s for s in SK.builtin_skills() if s.name == name]
+    tasks = ST.for_skill(name)
+    if not found or not tasks:
+        have = ", ".join(sorted(ST.TASKS)) or "none yet"
+        say(f"No built-in skill '{name}' with practice tasks. Skills with tasks: {have}", "m.err")
+        raise typer.Exit(1)
+    llm, model_name, num_ctx, backend = _score_model(model, remote, ctx, arch)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    rows = {}
+    for arm, chosen in (("without", None), ("with", found)):
+        runner = S.Runner(llm=llm, harness=harness_mod.load(), num_ctx=num_ctx, backend=backend,
+                          records=store_mod.root() / "practice-runs" / f"{stamp}-{name}-{arm}", arch=arch,
+                          skills=chosen)
+        say(f"  {arm} `{name}`: {len(tasks)} task(s) x {max(1, repeats)} · {model_name} · {backend}", "m.tool")
+
+        def line(r, arm=arm) -> None:
+            mark = "✓" if r.passed else "✗"
+            chk = {True: "checked", False: "NOT checked after its last change", None: "changed nothing"}[r.checked_last]
+            why = "" if r.passed else "  " + (r.detail.splitlines()[-1][:80] if r.detail else "")
+            say(f"  {mark} {arm:7} {r.id.split('/')[-1]:20} {r.seconds:.0f}s · {r.steps} steps · {chk}{why}",
+                "m.tool" if r.passed else "m.err")
+
+        rows[arm] = P.run(tasks, runner, model=model_name, on_task=line, repeats=max(1, repeats))
+    console.print()
+    for ln in P.skill_compare(rows["without"], rows["with"]).splitlines():
+        say("  " + ln, "m.tool")
+    say(f"  kept in {P.results_path()}", "m.faint")
 
 
 cli.command("practice")(cmd_practice)
@@ -2870,10 +2919,13 @@ def _chat():
         loaded.append(f"{count} instruction file{'s' if count != 1 else ''}")
 
     available_skills = skills_registry.discover(cfg["workspace"], cfg.get("skill_dirs"))
-    skills_prompt = _build_skills_prompt(available_skills)
+    # v0.9.0 F-2: built-in skills are loaded into a turn by their triggers, so the system prompt (Ollama's cached
+    # prefix) lists only the project's and yours, and stays the same all session
+    listed = [s for s in available_skills if s.source != "builtin"]
+    skills_prompt = _build_skills_prompt(listed)
     if skills_prompt:
         system_prompt += f"\n\n{skills_prompt}"
-        count = len(available_skills)
+        count = len(listed)
         loaded.append(f"{count} skill{'s' if count != 1 else ''}")
 
     # (workspace plugins were removed with the old engine, M1 stage 2)
@@ -3050,6 +3102,7 @@ def _chat():
             mcp_find=_chat_mcp_find,
             mcp_call=_chat_mcp_call,
             use_skill=lambda name: skills_registry.use_skill(cfg["workspace"], available_skills, name),
+            skill_note=lambda request, phase: _skill_note(cfg["workspace"], available_skills, request, phase),
             on_plan_event=EventPrinter(console),
             confirm_write=_chat_confirm_write,
             working=_chat_working,

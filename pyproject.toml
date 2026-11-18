@@ -39,6 +39,9 @@ include-package-data = true
 [tool.setuptools.packages.find]
 include = ["app*", "misc*"]
 
+[tool.setuptools.package-data]
+app = ["builtin_skills/*/*"]  # v0.9.0: the built-in skills ship with every install
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "test"]
 

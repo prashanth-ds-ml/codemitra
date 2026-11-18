@@ -647,6 +647,8 @@ class Hooks:
     mcp_call: Callable[[str, str, dict], str]
     on_plan_event: Callable | None = None  # core loop events while run_plan works
     use_skill: Callable[[str], str] | None = None  # (name) -> the skill's SKILL.md text or a ✗ (E-134)
+    # v0.9.0 F-2: (request, phase) -> (skill names, their text for this turn's note); None = no skills loaded
+    skill_note: Callable[[str, str], tuple[list[str], str]] | None = None
     # (rel, old text or None, new text) -> "yes" | "all" | "no: <reason>"; None = use `confirm` with a plain diff
     confirm_write: Callable[[str, str | None, str], str] | None = None
     working: Callable[[str], object] = _no_activity  # (label) -> context manager shown while a tool runs
@@ -1136,6 +1138,7 @@ class ChatSession:
         if not self.phase_request:
             return res  # talked: one call
         asked = name = self.phase_request["name"]
+        self._skills_given: set[str] = set()  # v0.9.0: a skill is loaded at most once per turn
         if name not in PHASES:  # it called a real tool by name: the phase that has it
             # E-126: a read to start a change ("fix it" -> read_file) is the change phase, which reads too
             wants_change = asks_change(user) or bool(go_note) or (is_go_ahead(user) and asks_change(before[-300:]))
@@ -1155,7 +1158,8 @@ class ChatSession:
                 phase["tools"] is None or asked in phase["tools"]):  # the change phase (None) has every tool
             self._run_decided(messages, asked)  # E-109: the query it asked for runs, it is not dropped
         focus = self.focus_note()  # E-126: stay on the project being worked on
-        messages.append(HumanMessage(content="\n".join(x for x in (go_note, focus, note) if x)))
+        skills_text = self._turn_skills(name)
+        messages.append(HumanMessage(content="\n".join(x for x in (go_note, focus, note, skills_text) if x)))
         self.answer_on_last_step, self.last_step_note = True, ONE_LAST_STEP_NOTE
         budget = self.harness.limit(budget_name) if budget_name else 1
         self.look_budget = budget
@@ -1168,11 +1172,29 @@ class ChatSession:
             phase = PHASES[name]
             self.last_phase, self.allowed_tools = name, phase["tools"]
             self.rec.write("phase", turn=self.turn_no, step=acted.steps, name=name, args={}, switched=True)
-            messages.append(HumanMessage(content=phase["note"]))
+            messages.append(HumanMessage(content="\n".join(x for x in (phase["note"], self._turn_skills(name)) if x)))
             budget = self.harness.limit(phase["budget"]) if phase["budget"] else 1
             more = self._turn(messages, TurnResult(journal=acted.journal), budget)
             acted = _merged(acted, more)
         return acted
+
+    def _turn_skills(self, phase: str) -> str:
+        """v0.9.0 F-2: the skills that fit this request in this phase, as text for the phase note; each one once per
+        turn, each use recorded (which skill, which phase) for the with / without comparison."""
+        if self.hooks.skill_note is None:
+            return ""
+        try:
+            names, text = self.hooks.skill_note(self._prev_user_full or "", phase)
+        except Exception as exc:  # noqa: BLE001 - a broken skill must not break the turn
+            self.rec.write("skill_error", turn=self.turn_no, phase=phase, error=str(exc)[:300])
+            return ""
+        given = getattr(self, "_skills_given", set())
+        new = [n for n in names if n not in given]
+        if not new or not text:
+            return ""
+        self._skills_given = given | set(new)
+        self.rec.write("skill", turn=self.turn_no, phase=phase, names=new, chars=len(text))
+        return text
 
     def _decide(self, messages: list, res: TurnResult, at: int, asks_search: bool, retry: bool = False) -> TurnResult:
         """The decide call (D-071): talk in text, or pick a phase. The talk reminder sits right before message `at`

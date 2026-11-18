@@ -44,7 +44,7 @@ def test_user_skills_are_found_and_project_wins_a_name(ws):
 
 def test_include_user_false_gives_only_the_project(ws):
     make_skill(skills.user_dir(), "mine")
-    assert skills.discover(str(ws), include_user=False) == []
+    assert skills.discover(str(ws), include_user=False, include_builtin=False) == []
 
 
 # ─── S2: the index is short and true; use_skill opens any skill ─────────────
@@ -83,7 +83,7 @@ def test_the_phased_prompt_with_20_skills_stays_under_budget():
 
 def test_the_repo_skills_index_is_small():
     repo = pathlib.Path(__file__).resolve().parents[1]
-    text = skills.format_prompt(skills.discover(str(repo), include_user=False))
+    text = skills.format_prompt(skills.discover(str(repo), include_user=False, include_builtin=False))
     assert math.ceil(len(text) / 3.5) < 300  # was ~1,440 tokens with the 23 repo skills
 
 
@@ -155,7 +155,7 @@ def test_add_to_the_project(ws, tmp_path):
     src = make_skill(tmp_path / "dl", "proj-skill")
     assert skills.handle_command(str(ws), f"add {src} --project").startswith("✓")
     assert (ws / ".codemitra" / "skills" / "proj-skill" / "SKILL.md").is_file()
-    assert {s.name for s in skills.discover(str(ws), include_user=False)} == {"proj-skill"}
+    assert {s.name for s in skills.discover(str(ws), include_user=False, include_builtin=False)} == {"proj-skill"}
 
 
 def test_add_refuses_a_clash_unless_replace(ws, tmp_path):
