@@ -4,6 +4,13 @@ existing MCP servers by trigger, 5 self-improvement. MongoDB (server, upload API
 
 # Status
 
+**2026-11-19: Stage 2.1 done** (918391c + F-142): a request the rules sort "big" goes to the real planner (Go /
+Change / Save), Go runs the step runner; a propose_plan decide does too; step records carry session / plan / task_id.
+Live (EVALS): the 9B never picked "plan" itself (E-150, fixed by the rules' "big"); planned tasks' Done-when checks
+can test nothing (E-151, docs task "passed" without the README link: Stage 2.3); a missing package loops until the
+step runner gives up honestly (E-152: Stage 2.4). 1,378 tests pass. Kaggle stopped (17.9 h left). Not pushed.
+**Next:** 2.2 spec format, then 2.3 checks first (fixes E-151), 2.4 finish gate (E-152).
+
 **2026-11-18 evening: Stage 1 DONE.** Live check on Kaggle (qwen3.5 9B, 10 turns on a Trip_splitter copy): 10 of
 10 turns answer all 8 questions after E-148/F-140 (runs never set request_kind, had no traces); E-149/F-141 (claims
 about earlier turns no longer marked false). 1,371 tests pass. Kaggle stopped (18.5 h left). Committed locally, not

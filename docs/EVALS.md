@@ -36,6 +36,28 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Stage 2.1 live check: bigger builds through the planner (2026-11-19, Kaggle T4, qwen3.5 9B, Trip_splitter copies)
+**A. Who decides "plan".** 4 requests, phased chat with the planner wired to propose_plan:
+
+| Request | Rules' kind | Decide picked | What happened |
+|---|---|---|---|
+| PDF export + download button + tests | big | look_at_code -> change | one 467 s turn, 28 steps; tags false_done, tool_misuse, missing_output |
+| docs/how_it_works.md + README link | small | look_at_code -> change | 68 s, both files changed |
+| pac-man game from scratch + tests | big | look_at_code -> change | one 518 s turn, 22 steps; tests failing; tags tests_fail, broken_code, tool_misuse |
+| one-line docstring | small | look_at_code -> change | 24 s, done |
+
+The decide never picked propose_plan (0 of 2 big builds); the rules sorted all 4 right. Fix F-142 (E-150): "big"
+goes to the planner with no decide call.
+
+**B. Planner + step runner (what Go runs).**
+- Docs request: plan in 12 s (2 tasks), ran in 112 s, 2/2 "passed", **but README.md has no link**: both Done-when
+  checks were the existing tests, which pass whatever the task does (E-151, for Stage 2.3).
+- PDF export: plan in 11-15 s with test-first tasks and specific Done-when tests (`pytest ...::test_generate_pdf_report`).
+  T1 wrote the test, saw it fail, wrote the code; `fpdf` is not installed and the step runner cannot install it;
+  after 3 rounds: failed, rolled back, needs help, no false done (E-152, for Stage 2.4). 0/2 tasks, 128 s.
+  (A first try used a workspace with read-only tests by mistake in the check script, not the product: 40 steps
+  refused 14 times; not counted.)
+
 ## Logs audit baseline, Stage 1.1 (2026-11-18, `codemitra trace check`, the store, read only)
 How many recorded chat turns the logs can answer each of the 8 Stage 1 questions for (ROADMAP Stage 1). 226 turns in
 10 records (2026-11-06..17, mitra-try and brick-breaker; no friends' records pulled into the store yet).

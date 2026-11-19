@@ -88,3 +88,28 @@ def test_the_chat_runs_the_planner_after_a_plan_decision(harness, monkeypatch): 
     ends = [r for r in rows if r["kind"] == "turn_end"]
     assert [e["outcome"] for e in ends] == ["to_planner", "plan_saved"] and ends[1]["via"] == "decide"
     assert list(ws.glob("*.plan.md"))  # saved in the project, so /run runs it there
+
+
+def test_a_big_request_goes_to_the_planner_without_a_decide_call(tmp_path):
+    """E-150 (live, qwen3.5 9B): the decide never picked propose_plan for two big builds; the rules' "big" decides."""
+    m = Model(AIMessage(content="", tool_calls=[tc("look_at_code", 1, what="look")]))
+    s = _session(tmp_path, m)
+    s.request_kind = "big"
+    res = s.phased(_msgs("add a PDF export of settlements with a download button in the app, with tests"))
+    assert res.plan_goal.startswith("add a PDF export") and m.calls == 0
+    assert any(r["kind"] == "phase" and r.get("by") == "kind" for r in _rows(s))
+
+
+def test_a_small_request_still_decides(tmp_path):
+    m = Model(AIMessage(content="Hi."))
+    s = _session(tmp_path, m)
+    s.request_kind = "small"
+    res = s.phased(_msgs("add a docstring to f"))
+    assert res.plan_goal == "" and m.calls == 1
+
+
+def test_big_without_the_planner_decides_as_before(tmp_path):
+    m = Model(AIMessage(content="Hi."))
+    s = _session(tmp_path, m, planner=False)
+    s.request_kind = "big"
+    assert s.phased(_msgs("build a game")).plan_goal == "" and m.calls == 1

@@ -1285,6 +1285,14 @@ class ChatSession:
         before = _last_answer(messages, at)
         offered = offered_phase(before)
         go_note = ""
+        if self.hooks.planner and self.request_kind == "big" and not (offered and is_go_ahead(user)):
+            # E-150 (Stage 2.1 live check, qwen3.5 9B): for "add PDF export with a download button and tests" and
+            # "build a pac-man game with tests" the decide picked look_at_code, never propose_plan, and both ran as
+            # one long turn (8-9 min, false done / failing tests). The rules sorted both as "big": that decides
+            res.plan_goal = user
+            self.deciding = False
+            self.rec.write("phase", turn=self.turn_no, step=0, name="propose_plan", to_planner=True, by="kind")
+            return res
         if offered and is_go_ahead(user):  # E-125: a yes to work CodeMitra offered starts it, no decide call
             self.deciding = False
             name, offer = offered
