@@ -3189,6 +3189,7 @@ def _chat():
             on_plan_event=EventPrinter(console),
             confirm_write=_chat_confirm_write,
             working=_chat_working,
+            planner=True,  # Stage 2.1: a propose_plan decide goes to the real planner and the step runner
         ),
     )
 
@@ -3661,13 +3662,15 @@ def _chat():
                            "ctrl+c stops", style="m.tool"))
         record_dir = pathlib.Path(cfg["workspace"]) / ".codemitra" / "runs" / f"plan-{time.strftime('%Y%m%d-%H%M%S')}"
         saved_hook, chat.ws.before_write = chat.ws.before_write, None
+        # Stage 2.1: each step's record carries the chat session, the plan and its task ID (filled in run_plan)
+        _plan_ctx = {"session_id": chat.session_id, "plan": pathlib.Path(path).name}
         chat.ws.journal = []
         results: dict = {}
         final = "not run"
         try:
             out = loop_mod.run_plan(text, chat.ws, local_llm, full_test_command="python -m pytest -q",
                                     on_event=EventPrinter(console), record_dir=record_dir, num_ctx=num_ctx,
-                                    git=False, harness=harness)
+                                    git=False, harness=harness, record_ctx=_plan_ctx)
             results, final = dict(out["tasks"]), out["final_tests"]
             failed = {tid: f"{r.get('tests', '')} · {str(r.get('summary', ''))[:300]}"
                       for tid, r in results.items() if r.get("status") != "passed"}
@@ -3682,7 +3685,8 @@ def _chat():
                     console.print(Markdown(retry[retry.find("### "):]))
                     out2 = loop_mod.run_plan(retry, chat.ws, local_llm, full_test_command="python -m pytest -q",
                                              on_event=EventPrinter(console), record_dir=record_dir,
-                                             num_ctx=num_ctx, git=False, harness=harness)
+                                             num_ctx=num_ctx, git=False, harness=harness,
+                                             record_ctx={**_plan_ctx, "replan": True})
                     results.update(out2["tasks"])
                     final = out2["final_tests"]
                 else:
@@ -4361,6 +4365,7 @@ def _chat():
                               seconds=time.monotonic() - _t_plan, **_plan_info)
             continue
 
+        _before_turn = len(messages)  # Stage 2.1: a turn handed to the planner is taken back out of the history
         messages.append(HumanMessage(content=user_input))
 
         console.print()
@@ -4384,6 +4389,15 @@ def _chat():
                 if architecture == "phased":
                     turn = chat.phased(messages, notes=_extra, talk_llm=_talk[0] if _talk else None,
                                        talk_ctx=_talk[1] if _talk else 0)
+                    if turn.plan_goal:  # Stage 2.1 (SPEC_DRIVEN S0): plan it for real, Go runs the step runner
+                        del messages[_before_turn:]  # _run_planned adds the request and what was built
+                        _t_plan = time.monotonic()
+                        _plan_info = _plan_first(planner_mod.with_discussion(user_input, messages) if talked_first
+                                                 else user_input) or {}
+                        chat.note_request(user_input, "big", "plan_first", _plan_info.pop("outcome", "plan_cancelled"),
+                                          seconds=time.monotonic() - _t_plan, via="decide", **_plan_info)
+                        ui.notify.done(console, time.monotonic() - turn_started)
+                        continue
                     if (chat.last_phase and bsession.kind != backend_mod.REMOTE
                             and backend_mod.route(session_mode, chat.role) == backend_mod.REMOTE):
                         _maybe_offer_kaggle()  # D-074: this turn did work, so Kaggle starts for the next ones

@@ -33,7 +33,7 @@ def test_ids_and_schema_on_every_row(tmp_path):
     rows = _rows(tmp_path)
     assert rows and all(r["session_id"] == s.session_id and r["v"] == 2 for r in rows)
     start = _rows(tmp_path, "turn_start")[0]
-    assert {k: start[k] for k in ("spec", "feature", "task")} == {"spec": "", "feature": "", "task": ""}
+    assert {k: start[k] for k in ("spec", "feature", "task_id")} == {"spec": "", "feature": "", "task_id": ""}
     assert start["files"] == {"tests/test_calc.py": TF._hash_bytes((tmp_path / "tests" / "test_calc.py").read_bytes())}
 
 

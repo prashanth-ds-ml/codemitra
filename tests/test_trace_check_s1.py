@@ -16,7 +16,7 @@ def _full(tmp_path):
     _write(rec, [
         {"t": 1, "kind": "session", "os": "Windows", "gpu": "RTX", "ollama_version": "0.13"},
         {"t": 2, "kind": "turn_start", "turn": 1, "user": "add a pause key", "request_kind": "change",
-         "backend": "laptop", "session_id": "s1", "spec": "", "feature": "", "task": "",
+         "backend": "laptop", "session_id": "s1", "spec": "", "feature": "", "task_id": "",
          "files": {"game.py": "abc"}},
         {"t": 3, "kind": "model", "turn": 1, "step": 1, "tokens_in": 10, "tokens_out": 5},
         {"t": 4, "kind": "tool", "turn": 1, "name": "edit_file", "args": {}, "ok": True, "output": "ok", "seconds": 0.1},

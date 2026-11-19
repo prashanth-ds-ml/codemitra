@@ -34,7 +34,7 @@ QUESTIONS = {
 OUTPUT_CAP = 3000          # tool rows keep this many characters of the output (chat.py)
 TRACE_SLACK_S = 2.0        # a trace call is written just after its record rows
 MACHINE_KEYS = ("os", "gpu", "ollama_version")
-ID_KEYS = ("session_id", "spec", "feature", "task")
+ID_KEYS = ("session_id", "spec", "feature", "task_id")
 TIME_KEYS = ("model_s", "tools_s", "wait_s")
 USED_KEYS = ("skills", "mcp", "lessons")
 

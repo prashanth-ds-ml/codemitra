@@ -587,6 +587,8 @@ def _short_diff(rel: str, old: str | None, new: str | None) -> tuple[str, int, i
 
 def turn_outcome(res) -> str:
     """One label per turn for the dashboard and the training-data filter (D-041)."""
+    if getattr(res, "plan_goal", ""):
+        return "to_planner"  # Stage 2.1: the planner's own turn records what happened next
     if res.stopped:
         return "stopped_by_user" if "esc" in (res.stop_reason or "") else "stopped"
     if res.tests_run:
@@ -738,6 +740,9 @@ class Hooks:
     # (rel, old text or None, new text) -> "yes" | "all" | "no: <reason>"; None = use `confirm` with a plain diff
     confirm_write: Callable[[str, str | None, str], str] | None = None
     working: Callable[[str], object] = _no_activity  # (label) -> context manager shown while a tool runs
+    # Stage 2.1: the real planner (runnable plan, Go / Change / Save, then the step runner) is there; a propose_plan
+    # decide hands the request to it (TurnResult.plan_goal) instead of writing a plan as chat text
+    planner: bool = False
 
 
 @dataclass
@@ -757,6 +762,7 @@ class TurnResult:
     first_s: float | None = None  # time to the first answer word or tool call of the turn (D-068)
     unverified: list = field(default_factory=list)  # E-110: claims no tool result of the turn backs
     switch_to: str = ""  # E-114: the phase a phase handed over to (look -> change / plan)
+    plan_goal: str = ""  # Stage 2.1: the request goes to the real planner and step runner (main runs it)
 
 
 def _merged(first: TurnResult, then: TurnResult) -> TurnResult:
@@ -786,7 +792,7 @@ class ChatSession:
         import uuid
         self.session_id = uuid.uuid4().hex[:12]  # Stage 1.2: on every row and call of this session
         self.rec.ctx["session_id"] = self.session_id
-        self.work = {"spec": "", "feature": "", "task": ""}  # Stage 1.2: what the turn belongs to (filled in Stage 2)
+        self.work = {"spec": "", "feature": "", "task_id": ""}  # Stage 1.2: what the turn belongs to (filled in Stage 2)
         self._used = {"skills": [], "mcp": [], "lessons": []}  # Stage 1.6, per turn
         self._snap_cache: dict = {}   # Stage 1.4: file hashes by (size, mtime), so a snapshot rereads only changes
         self._last_end_wall = 0.0     # Stage 1.7: when the last turn ended (your time = the gap to the next start)
@@ -1330,6 +1336,15 @@ class ChatSession:
             self.rec.write("phase_override", turn=self.turn_no, asked="look_at_code", to=name)
         self._skills_given: set[str] = set()  # v0.9.0: a skill is loaded at most once per turn
         self._unrun_script = ""  # E-145 (practice 2026-11-18, delete-rows): kept across a look -> change switch
+        if name == "propose_plan" and self.hooks.planner:
+            # Stage 2.1 (SPEC_DRIVEN S0): a bigger build goes to the real planner and the step runner (one task at a
+            # time, each checked), not a chat-text plan whose "yes" starts one long free-form turn (E-125 / E-126)
+            args = self.phase_request.get("args") or {}
+            res.plan_goal = user  # the planner gets your whole request, not the model's one-line summary of it
+            res.text = ""
+            self.rec.write("phase", turn=self.turn_no, step=res.steps, name="propose_plan", to_planner=True,
+                           goal=str(args.get("goal") or args.get("what") or "")[:300])
+            return res
         if name not in PHASES:  # it called a real tool by name: the phase that has it
             # E-126: a read to start a change ("fix it" -> read_file) is the change phase, which reads too
             wants_change = asks_change(user) or bool(go_note) or (is_go_ahead(user) and asks_change(before[-300:]))

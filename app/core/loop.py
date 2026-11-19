@@ -297,6 +297,7 @@ def solve(
     max_rounds: int = 3,
     rollback: bool = False,
     harness=None,
+    record_ctx: dict | None = None,
 ) -> RunResult:
     """Work on `task` in `ws` until `ws.test_command` passes or a limit is hit."""
     emit = on_event or (lambda e: None)
@@ -306,6 +307,7 @@ def solve(
     system_prompt = H.apply_prompt(SYSTEM_PROMPT, h)
     specs = H.apply_tools(T.TOOL_SPECS, h)
     rec = Recorder(record_path)
+    rec.ctx.update(record_ctx or {})  # Stage 2.1: session / plan / task IDs on every row of a planned task
     t0 = time.monotonic()
     result = RunResult(status="stopped", summary="", record_path=str(record_path or ""))
     from app.core import runinfo
@@ -432,13 +434,19 @@ def solve(
 
             emit(Event("tool", {"name": name, "args": args}))
             refused = guard.before(name, args)
+            t_tool = time.monotonic()
             if refused:
                 output, run = refused, None
             else:
                 output, run = run_tool(ws, name, args)
+            tool_s = round(time.monotonic() - t_tool, 3)
             ok = run.passed if run is not None else not output.startswith("✗")
             emit(Event("result", {"name": name, "args": args, "ok": ok, "output": output}))
-            rec.write("tool", name=name, args=args, ok=ok, output=output[:4000])
+            # Stage 2.1: a planned step's tool rows carry their time and full length, the full text in the trace
+            rec.write("tool", step=step, name=name, args=args, ok=ok, output=output[:4000], output_chars=len(output),
+                      seconds=tool_s)
+            if len(output) > 4000:
+                rec.tool_output(output, step=step, name=name)
             messages.append(ToolMessage(content=output, tool_call_id=tc["id"]))
             if run is not None:
                 result.tests = run
@@ -525,7 +533,8 @@ def needs_help(task: "PlanTask", res: RunResult, files: list[str]) -> str:
 
 def run_plan(plan_text: str, ws: T.Workspace, llm, *, full_test_command: str, max_steps: int | None = None,
              on_event: Callable[[Event], None] | None = None, record_dir: Path | None = None,
-             num_ctx: int = 65536, git: bool = True, rollback: bool = True, harness=None) -> dict:
+             num_ctx: int = 65536, git: bool = True, rollback: bool = True, harness=None,
+             record_ctx: dict | None = None) -> dict:
     """For each task: implement until its 'Done when' command passes; then run the full tests."""
     emit = on_event or (lambda e: None)
     t0 = time.monotonic()
@@ -549,7 +558,8 @@ def run_plan(plan_text: str, ws: T.Workspace, llm, *, full_test_command: str, ma
         start = len(ws.journal)
         res = solve(f"{task.id}: {task.title}\n{task.body}", ws, llm, max_steps=max_steps,
                     on_event=on_event, record_path=rec, context=f"The plan's shared notes:\n{header}",
-                    num_ctx=num_ctx, rollback=rollback, harness=harness)
+                    num_ctx=num_ctx, rollback=rollback, harness=harness,
+                    record_ctx={**(record_ctx or {}), "task_id": task.id})
         results[task.id] = res
         files = sorted({T.Path(e["path"]).resolve().relative_to(ws.root).as_posix() for e in ws.journal[start:]}
                        | set(res.changed))
