@@ -50,6 +50,8 @@ the step runner's records (`/plan`, nights) get these facts in Stage 2.
 project: a question, an edit, a new file, a failing test, a false "done", Kaggle if up).
 
 ## Stage 2 · Spec-driven core, made reliable
+**Status 2026-11-19:** 2.1 done (a request the rules sort "big" goes to the planner; Go runs the step runner). Live check (EVALS): the 9B never chose to plan itself (E-150, rules decide), Done-when checks can test nothing (E-151: the fail-first check moves into 2.2 with the spec format), a missing package loops (E-152: 2.4 and a plan check for uninstalled imports before Go). Decisions: specs live in the project's `specs/`; you approve every spec before code. Next: 2.2 + fail-first.
+
 | Step | What | From |
 |---|---|---|
 | 2.1 | I-37 S0: a bigger request in the normal chat goes through the planner (runnable plan, Go / Change / Save) and the step runner (fresh context per task, checks, one re-plan), not one long free-form turn | SPEC_DRIVEN |

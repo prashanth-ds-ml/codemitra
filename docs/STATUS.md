@@ -4,6 +4,21 @@ existing MCP servers by trigger, 5 self-improvement. MongoDB (server, upload API
 
 # Status
 
+**SESSION CLOSED 2026-11-19.** Nothing running (Ollama idle, Kaggle stopped, 17.9 h left until Sat 21 Nov).
+Committed locally, NOT pushed: 8f99c63, c3d83f2 (Stage 1), 918391c, 5e975a1 (Stage 2.1) + this docs commit, on top of
+the earlier unpushed v0.9.0 work (skills, E-142..E-147). Push / release only on the user's go (CHANGELOG
+"Unreleased" lists it). Not committed on purpose: `results/practice.jsonl` (local practice runs),
+`results/model_screen-2026-11-08-a.json`.
+**Next session, in order:**
+1. 2.2 spec format (`specs/project.md`, `specs/F-nnn-<name>.md`: goal, out of scope, AC-n with checks, T-n) with
+   the planner drafting and the user approving, plus 2.3's fail-first check pulled in (a Done-when that already
+   passes before its task is not a check: E-151).
+2. 2.4 finish gate incl. environment-missing vs tests-failed and a plan check for uninstalled imports (E-152).
+3. 2.5 loop guard, 2.6 evidence report, 2.7 `codemitra status`; Stage 2 done when a multi-step feature is built
+   from a spec unattended on the 9B with no false done.
+Parked for discussion: I-38 embedded C (probe needs a C toolchain on the laptop), MongoDB (server, upload API,
+dashboard), saran743 invite to the logs repo. Live-check scripts were in the session temp folder (not kept).
+
 **2026-11-19: Stage 2.1 done** (918391c + F-142): a request the rules sort "big" goes to the real planner (Go /
 Change / Save), Go runs the step runner; a propose_plan decide does too; step records carry session / plan / task_id.
 Live (EVALS): the 9B never picked "plan" itself (E-150, fixed by the rules' "big"); planned tasks' Done-when checks
