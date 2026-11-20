@@ -1057,6 +1057,7 @@ _COMMAND_HELP = [
         ("/mcp",           "MCP servers: list, test, tools, add, remove, on/off, trust, import, call"),
         ("/skills",        "Skills: list, show <name>, add <folder or git URL>, remove, import claude"),
         ("/logs [name]",   "Inspect .codemitra logs"),
+        ("/spec [F-nnn]",  "Feature specs in specs/: list them, or show one"),
         ("/resume",        "Saved session summary and recent activity"),
         ("/compact",       "Compress the conversation to free context"),
         ("/clear",         "Clear the conversation (saved files are kept)"),
@@ -3602,18 +3603,20 @@ def _chat():
     project_words = intent_mod.project_words(pathlib.Path(cfg["workspace"]))
 
     def _plan_first(task: str) -> dict:
-        """P4: a short runnable plan from a small context pack; Go / Change / Save / Cancel (auto mode: Go).
-        Returns what happened for the records (D-068): outcome, your choice, planning rounds, steps passed."""
-        console.print(Text("  ✎ a bigger change: planning it first (small steps, each checked) · "
-                           "`/do <task>` skips planning", style="m.tool"))
+        """P4 + Stage 2.2: a feature spec (criteria with checks, needs, tasks) from a small context pack; you approve
+        it: Go / Change / Save / Cancel (auto mode: Go). Missing libraries are offered for install first. Returns
+        what happened for the records (D-068): outcome, your choice, rounds, steps passed, the feature id."""
+        from app.core import specs as specs_mod
+        console.print(Text("  ✎ a bigger change: a spec first (what done means, each part checked), then small "
+                           "steps · `/do <task>` skips it", style="m.tool"))
         pack = planner_mod.context_pack(pathlib.Path(cfg["workspace"]), task)
         text, feedback, choice = "", "", None
         rounds = 0
         for _round in range(6):
             rounds = _round + 1
-            console.print(Text("  planning …", style="m.faint"))
+            console.print(Text("  writing the spec …", style="m.faint"))
             try:
-                text, problem = planner_mod.make_plan(local_llm, task, pack, feedback=feedback,
+                text, problem = planner_mod.make_spec(local_llm, task, pack, feedback=feedback,
                                                       previous=text if feedback else "")
             except KeyboardInterrupt:
                 console.print(Text("  planning stopped", style="m.info"))
@@ -3623,14 +3626,14 @@ def _chat():
                 return {"outcome": "error", "choice": "", "rounds": rounds, "reason": str(exc)[:300]}
             console.print(Markdown(text))
             if problem:
-                console.print(Text(f"  ⚠ the plan still has a problem: {problem}", style="m.info"))
+                console.print(Text(f"  ⚠ the spec still has a problem: {problem}", style="m.info"))
             if session_mode == "auto" and not problem:
                 choice = "go"
                 console.print(Text("  auto mode: building it now", style="m.faint"))
                 break
-            choice = ui.menu.choose(console, "Build this plan?",
-                                    [("go", "Go: build it step by step"), ("change", "Change it (say how)"),
-                                     ("save", "Save it for /run (unattended)"), ("cancel", "Cancel")],
+            choice = ui.menu.choose(console, "Approve this spec?",
+                                    [("go", "Go: approve and build it step by step"), ("change", "Change it (say how)"),
+                                     ("save", "Approve and save it for /run (unattended)"), ("cancel", "Cancel")],
                                     default="change" if problem else "go")
             if choice != "change":
                 break
@@ -3642,20 +3645,51 @@ def _chat():
                 choice = None
                 break
         if choice not in ("go", "save"):
-            console.print(Text("  plan not used", style="m.faint"))
+            console.print(Text("  spec not used", style="m.faint"))
             return {"outcome": "plan_cancelled", "choice": choice or "cancel", "rounds": rounds}
-        path = planner_mod.save(pathlib.Path(cfg["workspace"]), task, text)
+        path, fid = specs_mod.save(pathlib.Path(cfg["workspace"]), text)
+        text = path.read_text(encoding="utf-8")
+        spec = specs_mod.parse(text, fid)
+        console.print(Text(f"  ✓ approved: {path.relative_to(pathlib.Path(cfg['workspace'])).as_posix()}",
+                           style="m.tool"))
+        _offer_installs(spec)  # E-152: a library the spec needs is installed (on your OK) before any step runs
         if choice == "save":
-            console.print(Text(f"  saved {path.name} · `/run {path.name} 4` builds it unattended", style="m.tool"))
-            return {"outcome": "plan_saved", "choice": "save", "rounds": rounds}
-        done = _run_planned(task, text, path)
+            rel = path.relative_to(pathlib.Path(cfg["workspace"])).as_posix()
+            console.print(Text(f"  saved · `/run {rel} 4` builds it unattended", style="m.tool"))
+            return {"outcome": "plan_saved", "choice": "save", "rounds": rounds, "feature": fid}
+        done = _run_planned(task, text, path, spec=spec)
         return {"outcome": "tests_passed" if done["ok"] else "tests_failed", "choice": "go", "rounds": rounds,
-                "steps_passed": done["passed"], "steps_total": done["total"]}
+                "steps_passed": done["passed"], "steps_total": done["total"], "feature": fid}
 
-    def _run_planned(task: str, text: str, path) -> dict:
+    def _offer_installs(spec) -> list[str]:
+        """Stage 2.2 (E-152): the spec's `## Needs` libraries that the project's Python lacks; each is installed
+        only on your OK (pip into the project's own Python). Returns what is still missing."""
+        from app.core import specs as specs_mod
+        from app.core import tools as tools_mod
+        missing = specs_mod.missing_packages(spec, lambda name: tools_mod.package_info(chat.ws, name))
+        still = []
+        for name in missing:
+            py = tools_mod.project_python(chat.ws.root)
+            answer = ui.menu.choose(console, f"The spec needs `{name}`, which is not installed. Install it?",
+                                    [("yes", f"Yes: {pathlib.Path(py).name} -m pip install {name}"),
+                                     ("no", "No: I will install it (the steps that need it will fail)")],
+                                    default="yes")
+            if answer != "yes":
+                still.append(name)
+                continue
+            out, ok = _chat_shell(f'"{py}" -m pip install {name}')
+            if not ok:
+                still.append(name)
+        if still:
+            console.print(Text(f"  ⚠ still missing: {', '.join(still)}", style="m.info"))
+        return still
+
+    def _run_planned(task: str, text: str, path, spec=None) -> dict:
         """P5: one step at a time with a fresh small context and its check; failed steps re-planned once; the
-        resume note written; the chat remembers what was done."""
+        resume note written; the chat remembers what was done. Stage 2.2: each task's check must fail before the
+        task (fail-first), the records carry the feature, and "you check" criteria are asked at the end."""
         from app.core import loop as loop_mod
+        from app.core import specs as specs_mod
         _, tasks = loop_mod.parse_plan(text)
         titles = {t.id: t.title for t in tasks}
         console.print(Text(f"  ▶ building {len(tasks)} steps, one at a time (each with a fresh, small context) · "
@@ -3664,13 +3698,16 @@ def _chat():
         saved_hook, chat.ws.before_write = chat.ws.before_write, None
         # Stage 2.1: each step's record carries the chat session, the plan and its task ID (filled in run_plan)
         _plan_ctx = {"session_id": chat.session_id, "plan": pathlib.Path(path).name}
+        if spec is not None:  # Stage 2.2: the feature and its spec file on every row of every step
+            _plan_ctx.update(spec=pathlib.Path(path).name, feature=spec.feature)
+            chat.work.update(spec=pathlib.Path(path).name, feature=spec.feature)
         chat.ws.journal = []
         results: dict = {}
         final = "not run"
         try:
             out = loop_mod.run_plan(text, chat.ws, local_llm, full_test_command="python -m pytest -q",
                                     on_event=EventPrinter(console), record_dir=record_dir, num_ctx=num_ctx,
-                                    git=False, harness=harness, record_ctx=_plan_ctx)
+                                    git=False, harness=harness, record_ctx=_plan_ctx, fail_first=spec is not None)
             results, final = dict(out["tasks"]), out["final_tests"]
             failed = {tid: f"{r.get('tests', '')} · {str(r.get('summary', ''))[:300]}"
                       for tid, r in results.items() if r.get("status") != "passed"}
@@ -3686,7 +3723,8 @@ def _chat():
                     out2 = loop_mod.run_plan(retry, chat.ws, local_llm, full_test_command="python -m pytest -q",
                                              on_event=EventPrinter(console), record_dir=record_dir,
                                              num_ctx=num_ctx, git=False, harness=harness,
-                                             record_ctx={**_plan_ctx, "replan": True})
+                                             record_ctx={**_plan_ctx, "replan": True},
+                                             fail_first=spec is not None)
                     results.update(out2["tasks"])
                     final = out2["final_tests"]
                 else:
@@ -3696,9 +3734,17 @@ def _chat():
                                style="m.info"))
         finally:
             chat.ws.before_write = saved_hook
+            chat.work.update(spec="", feature="", task_id="")
         for tid, r in results.items():
             r["title"] = titles.get(tid, "")
         note = planner_mod.resume_note(task, path, results, final)
+        if spec is not None:
+            mine = specs_mod.you_check(spec)
+            if mine:  # never counted as verified: you say whether they hold
+                note += "\nYou check (not verified by CodeMitra):\n" + "\n".join(f"- {c.id}: {c.text}" for c in mine) + "\n"
+            passed_n = sum(1 for r in results.values() if r.get("status") == "passed")
+            specs_mod.set_status(path, "built" if results and passed_n == len(results) else
+                                 f"in progress: {passed_n} of {len(results)} tasks passed")
         resume_file = pathlib.Path(cfg["workspace"]) / ".codemitra" / "resume.md"
         resume_file.parent.mkdir(parents=True, exist_ok=True)
         resume_file.write_text(note, encoding="utf-8")
@@ -4249,6 +4295,25 @@ def _chat():
                 console.print(Text("    showing it live here · ctrl+c stops watching (the night keeps going, also if you "
                                    "close CodeMitra) · `/night` shows it again · don't chat meanwhile", style="m.faint"))
                 _follow_night()
+            continue
+
+        if cmd == "/spec" or cmd.startswith("/spec "):  # Stage 2.2: the project's feature specs
+            from app.core import specs as specs_mod
+            root = pathlib.Path(cfg["workspace"])
+            rows = specs_mod.listing(root)
+            want = user_input.strip().split()[1].upper() if len(user_input.strip().split()) > 1 else ""
+            if not rows:
+                _say("No feature specs here yet. Ask for a bigger change (a feature, an app) and CodeMitra writes "
+                     "one in `specs/` for you to approve before any code.")
+            elif want:
+                hit = next((name for name, _, _ in rows if name.upper().startswith(want)), "")
+                if hit:
+                    console.print(Markdown((specs_mod.spec_dir(root) / hit).read_text(encoding="utf-8")))
+                else:
+                    _say(f"No spec {want} in `specs/` ({', '.join(n.split('-', 2)[0] + '-' + n.split('-', 2)[1] for n, _, _ in rows)}).")
+            else:
+                _say("\n".join(["Feature specs (`/spec F-001` shows one):"]
+                                + [f"- `{name}` {title} · {status}" for name, title, status in rows]))
             continue
 
         if cmd in ("/plan", "/plan help") or cmd.startswith(("/plan template", "/plan check")):  # runnable plans (D-055)

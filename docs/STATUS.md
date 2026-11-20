@@ -4,6 +4,8 @@ existing MCP servers by trigger, 5 self-improvement. MongoDB (server, upload API
 
 # Status
 
+**2026-11-20: Stage 2.2 + fail-first DONE (committed locally, not pushed).** Specs in `specs/`, approved by you, built with fail-first; live (EVALS): the docs feature built 2/2 with both checks failing first and the README link really there (E-151 closed, F-143); the PDF spec named fpdf2, found missing, offered for install (F-144, part of E-152). 1,390 tests. Kaggle stopped (17.7 h left). **Next:** 2.4 finish gate (environment missing vs tests failed in the step runner and the chat; no work / named files / plan files / JSON; refusals give the next action).
+
 **SESSION CLOSED 2026-11-19.** Nothing running (Ollama idle, Kaggle stopped, 17.9 h left until Sat 21 Nov).
 Committed locally, NOT pushed: 8f99c63, c3d83f2 (Stage 1), 918391c, 5e975a1 (Stage 2.1) + this docs commit, on top of
 the earlier unpushed v0.9.0 work (skills, E-142..E-147). Push / release only on the user's go (CHANGELOG

@@ -76,7 +76,8 @@ def test_the_chat_runs_the_planner_after_a_plan_decision(harness, monkeypatch): 
     monkeypatch.setattr(main, "get_local_llm", fake_llm)
     made = []
     from app.core import planner
-    monkeypatch.setattr(planner, "make_plan", lambda llm, task, pack, **k: made.append(task) or (PLAN, ""))
+    from tests.test_s22_specs import SPEC
+    monkeypatch.setattr(planner, "make_spec", lambda llm, task, pack, **k: made.append(task) or (SPEC, ""))
     monkeypatch.setattr(main.ui.menu, "choose", lambda *a, **k: "save")
     Inputs.script = ["build a feedback app with a store and a form", "exit"]
     main._chat()
@@ -87,7 +88,7 @@ def test_the_chat_runs_the_planner_after_a_plan_decision(harness, monkeypatch): 
     assert [p for p, _ in starts] == ["phased", "plan_first"]
     ends = [r for r in rows if r["kind"] == "turn_end"]
     assert [e["outcome"] for e in ends] == ["to_planner", "plan_saved"] and ends[1]["via"] == "decide"
-    assert list(ws.glob("*.plan.md"))  # saved in the project, so /run runs it there
+    assert list((ws / "specs").glob("F-001-*.md"))  # Stage 2.2: an approved spec, saved in the project
 
 
 def test_a_big_request_goes_to_the_planner_without_a_decide_call(tmp_path):

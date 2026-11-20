@@ -36,6 +36,14 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Stage 2.2 live check: specs + fail-first (2026-11-20, Kaggle T4, qwen3.5 9B, Trip_splitter copies)
+| Request | Spec | Build | Result |
+|---|---|---|---|
+| docs/how_it_works.md + README link (E-151's case) | 21 s, no problem: AC-1 / AC-2 each with a NEW test (`test_ac1_docs_exists.py`, `test_ac2_readme_link.py`), AC-3 "you check" | fail-first: both checks failed before their task; 2/2 passed in 151 s | **the README link is there** (2 places); 62-line page; AC-3 listed for you |
+| PDF export + download button | 18 s, no problem: AC-1 / AC-2 new tests, AC-3 "you check"; Needs: fpdf2 | not built (spec only) | fpdf2 detected as missing (would be offered for install) |
+
+Same docs request on 2026-11-19 without specs: 2/2 "passed", no link (E-151). The full suite's 1 failure (`test_streamlit_app_loads_and_runs_demo`) fails the same on an untouched copy (this machine's Streamlit), not the feature. Found: the 9B copied the template's `<one or two sentences>` into every task; the spec check now names leftover placeholders.
+
 ## Stage 2.1 live check: bigger builds through the planner (2026-11-19, Kaggle T4, qwen3.5 9B, Trip_splitter copies)
 **A. Who decides "plan".** 4 requests, phased chat with the planner wired to propose_plan:
 

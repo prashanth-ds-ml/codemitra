@@ -39,6 +39,41 @@ Rules: each task touches at most 3 files and can be done in a few edits; every t
 backticks (no && or pipes; python -m pytest ...); paths are relative to the project folder (as in the file tree);
 reuse existing files and names from the outlines; Needs names earlier tasks or -. No text outside the plan."""
 
+SPEC_PROMPT = """You write a feature spec for a small coding model that builds it one task at a time. You get the
+request and the project's context. Write the spec in exactly this format and nothing else:
+
+# Feature: <one line>
+
+## Goal
+<two sentences: what is true for the user when it is done>
+
+## Out of scope
+- <what this feature does not do>
+
+## Criteria
+- AC-1: <one observable fact when done> · check: `python -m pytest -q tests/test_ac1_<name>.py`
+- AC-2: <another fact> · check: `python -m pytest -q tests/test_ac2_<name>.py`
+- AC-3: <a fact only a person can judge: looks, wording> · check: you check
+
+## Needs
+- <a library that must be installed, e.g. fpdf2> (or "- none")
+
+## Tasks
+
+### T1: <small piece>
+- Files: `tests/test_ac1_<name>.py`, `<path>.py`
+- Criteria: AC-1
+- Do: first write the test for AC-1 (it must fail now), then the code. <one or two sentences>
+- Done when: `python -m pytest -q tests/test_ac1_<name>.py` passes
+- Needs: -
+
+Rules: 2-7 criteria; each criterion is checked by its own NEW test file that its task writes first, so the check
+fails before the work and passes after (a check that passes already proves nothing); a docs or config change is
+checked by a test that reads the file (e.g. asserts the README contains the link); never use the existing test suite
+as a check. Each task touches at most 3 files, names its criteria, and has ONE Done-when command in backticks (no &&
+or pipes; python -m pytest ...). Paths are relative to the project folder; reuse existing files and names from the
+outlines; Needs names earlier tasks or -. No text outside the spec."""
+
 REPLAN_PROMPT = """These tasks of the plan failed. Rewrite ONLY them as smaller, clearer tasks (same format, new ids
 T101, T102, ...; '- Needs: -'), using what the failure says. No text outside the tasks."""
 
@@ -93,6 +128,10 @@ def context_pack(root: Path, task: str) -> str:
     brief = resume.brief(Path(root), max_chars=1200)
     if brief:
         parts.append(brief)
+    from app.core import specs
+    rules = specs.project_rules(Path(root))  # Stage 2.2: your vision, must-haves and rules, when written
+    if rules:
+        parts.append("## specs/project.md\n" + rules)
     try:
         tree = T.list_files(ws, ".").splitlines()
     except T.ToolError:
@@ -147,6 +186,32 @@ def make_plan(llm, task: str, pack: str, *, feedback: str = "", previous: str = 
         text = extract(_invoke(llm, msgs))
         _, problem = plans.check_text(text)
     return text, problem
+
+
+def make_spec(llm, task: str, pack: str, *, feedback: str = "", previous: str = "") -> tuple[str, str]:
+    """Stage 2.2: (spec text, problem). A feature spec (criteria with checks, needs, tasks in the runnable plan
+    format); one repair round when specs.check finds problems."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from app.core import specs
+    ask = f"Request:\n{task}\n\nProject:\n{pack}"
+    if previous:
+        ask += f"\n\nYour previous spec:\n{previous}\n\nChange it like this: {feedback}"
+    msgs = [SystemMessage(content=SPEC_PROMPT), HumanMessage(content=ask)]
+    text = extract_spec(_invoke(llm, msgs))
+    _, problem = specs.check(text)
+    if problem:
+        msgs += [HumanMessage(content=f"The spec cannot run: {problem} Write the whole spec again, fixed.")]
+        text = extract_spec(_invoke(llm, msgs))
+        _, problem = specs.check(text)
+    return text, problem
+
+
+def extract_spec(text: str) -> str:
+    """The spec from the reply: from its '# Feature' line (thinking or chatter before it dropped)."""
+    text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.S).strip()
+    text = re.sub(r"^```(?:markdown|md)?\s*\n|\n```\s*$", "", text)
+    at = re.search(r"^#\s*Feature", text, re.M)
+    return (text[at.start():] if at else text).strip() + "\n"
 
 
 def slug(task: str) -> str:

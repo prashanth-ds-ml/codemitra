@@ -534,8 +534,10 @@ def needs_help(task: "PlanTask", res: RunResult, files: list[str]) -> str:
 def run_plan(plan_text: str, ws: T.Workspace, llm, *, full_test_command: str, max_steps: int | None = None,
              on_event: Callable[[Event], None] | None = None, record_dir: Path | None = None,
              num_ctx: int = 65536, git: bool = True, rollback: bool = True, harness=None,
-             record_ctx: dict | None = None) -> dict:
-    """For each task: implement until its 'Done when' command passes; then run the full tests."""
+             record_ctx: dict | None = None, fail_first: bool = False) -> dict:
+    """For each task: implement until its 'Done when' command passes; then run the full tests.
+    `fail_first` (Stage 2.2, E-151): run each task's check before the task; one that already passes tests nothing
+    about it, so the task is not built (status "check_passes") and the plan goes back to be fixed."""
     emit = on_event or (lambda e: None)
     t0 = time.monotonic()
     header, tasks = parse_plan(plan_text)
@@ -555,6 +557,19 @@ def run_plan(plan_text: str, ws: T.Workspace, llm, *, full_test_command: str, ma
         emit(Event("task", {"id": task.id, "title": task.title}))
         ws.test_command = task.test_command or full_test_command
         rec = (record_dir / f"{task.id}.jsonl") if record_dir else None
+        if fail_first and task.test_command:
+            before = T.run_tests(ws)
+            emit(Event("note", {"text": f"{task.id} check before the work: "
+                                        f"{'passes already' if before.passed else 'fails, as it should'}",
+                                "ok": not before.passed}))
+            if before.passed:
+                results[task.id] = RunResult(
+                    "check_passes", f"Its check `{task.test_command}` passes before the work ({before.summary}), so "
+                    "it does not test this task. Give it a check that fails now: a new test the task writes first.",
+                    tests=before)
+                helps.append(f"### {task.id}: {task.title}: its check passes before the work\n- Check: "
+                             f"`{task.test_command}` ({before.summary})\n")
+                continue
         start = len(ws.journal)
         res = solve(f"{task.id}: {task.title}\n{task.body}", ws, llm, max_steps=max_steps,
                     on_event=on_event, record_path=rec, context=f"The plan's shared notes:\n{header}",
@@ -574,6 +589,7 @@ def run_plan(plan_text: str, ws: T.Workspace, llm, *, full_test_command: str, ma
               "passed_tasks": sum(1 for v in results.values() if v.status == "passed"),
               "total_tasks": len(tasks), "final_tests_passed": final.passed, "final_tests": final.summary,
               "needs_help": helps, "branch": branch, "commits": commits,
+              "check_passes": [k for k, v in results.items() if v.status == "check_passes"],
               "seconds": round(time.monotonic() - t0), "tokens_in": sum(v.tokens_in for v in results.values()),
               "tokens_out": sum(v.tokens_out for v in results.values())}
     if record_dir:

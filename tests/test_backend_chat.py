@@ -321,10 +321,14 @@ PLAN = """# Feature: score counter
 ## Goal
 Count points.
 
+## Criteria
+- AC-1: Score counts points · check: `python -m pytest -q tests/test_score.py`
+
 ## Tasks
 
 ### T1: score class
 - Files: `tests/test_score.py`, `score.py`
+- Criteria: AC-1
 - Do: test first, then the class.
 - Done when: `python -m pytest -q tests/test_score.py` passes
 - Needs: -
@@ -340,8 +344,8 @@ def _planning_llm(state, monkeypatch):
         chat_stream = m.stream
 
         def stream(messages):  # the planner streams (F-078); the chat gets its scripted answers
-            from app.core.planner import PLANNER_PROMPT
-            if messages and str(messages[0].content).startswith(PLANNER_PROMPT[:60]):
+            from app.core.planner import PLANNER_PROMPT, SPEC_PROMPT
+            if messages and str(messages[0].content).startswith((PLANNER_PROMPT[:60], SPEC_PROMPT[:60])):
                 return iter([AIMessage(content=PLAN)])
             return chat_stream(messages)
 
@@ -388,12 +392,12 @@ def test_a_big_request_is_planned_then_built_after_go(harness, monkeypatch, caps
     Inputs.script = ["build a score system for the game with a high score file and a menu", "exit"]
     main._chat()
     out = " ".join(capsys.readouterr().out.split())
-    assert "planning it first" in out and "Feature: score counter" in out
-    assert asked and asked[-1][0] == "Build this plan?" and asked[-1][2] == "go"
+    assert "a spec first" in out and "Feature: score counter" in out  # Stage 2.2: a spec you approve
+    assert asked and asked[-1][0] == "Approve this spec?" and asked[-1][2] == "go"
     assert runs and runs[0]["git"] is False and "### T1: score class" in runs[0]["text"]
     resume_note = (ws / ".codemitra" / "resume.md").read_text(encoding="utf-8")
     assert "T1 ✓ score class: 2 passed" in resume_note and "all tasks passed" in resume_note
-    assert list(ws.glob("*.plan.md"))
+    assert list((ws / "specs").glob("F-001-*.md"))
 
 
 def test_plan_command_and_save_for_a_night(harness, monkeypatch, capsys):
@@ -405,8 +409,8 @@ def test_plan_command_and_save_for_a_night(harness, monkeypatch, capsys):
     Inputs.script = ["/plan add a score counter", "exit"]
     main._chat()
     out = " ".join(capsys.readouterr().out.split())
-    saved = list(ws.glob("*.plan.md"))
-    assert runs == [] and saved and f"/run {saved[0].name} 4" in out
+    saved = list((ws / "specs").glob("F-001-*.md"))
+    assert runs == [] and saved and f"/run specs/{saved[0].name} 4" in out
 
 
 def test_do_skips_planning(harness, monkeypatch):

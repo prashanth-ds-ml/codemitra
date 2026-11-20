@@ -1,6 +1,7 @@
 # Spec-driven development for CodeMitra (I-37) · in progress (ROADMAP Stage 2)
 
 **2026-11-19:** S0 done as ROADMAP 2.1 (918391c, 5e975a1): a big request goes to the planner and Go runs the step runner; the 9B does not choose to plan by itself, so the rules' "big" decides (E-150). Agreed: specs in the project's `specs/`, you approve each spec before code. S2's fail-first check comes with S1 (E-151).
+**2026-11-20:** S1 + S2 done (F-143): `specs/project.md` (template, read by the planner once you fill it), `specs/F-nnn-<slug>.md`, `/spec`, fail-first; live check in EVALS. Records carry spec + feature IDs. Next from this plan: S3 (linked records: mostly done in Stage 1), S4 `codemitra status` (ROADMAP 2.7).
 
 **Your words (2026-11-17):** "if we can have spec driven development i feel we can have all the features there test
 cases and all possible things or must have things that will help codemitra to work properly and i also believe we can
