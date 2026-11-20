@@ -709,12 +709,28 @@ def test_args(ws: Workspace, path: str = "", keyword: str = "", first_failure: b
     return extra
 
 
+def split_command(cmd: str) -> list[str]:
+    """Stage 2.3: a check is any command. Quoted arguments stay whole (`python -c "assert 'x' in open('R.md').read()"`),
+    and a program found on PATH under another name (Windows: npm.cmd, make.exe) is called by its full path."""
+    import shlex
+    import shutil
+    try:
+        args = shlex.split(cmd) if ('"' in cmd or "'" in cmd) else cmd.split()
+    except ValueError:  # an unbalanced quote: as written
+        args = cmd.split()
+    if args and args[0] not in ("python", "python3", "py"):
+        found = shutil.which(args[0])
+        if found:
+            args[0] = found
+    return args
+
+
 def run_tests(ws: Workspace, command: str | None = None, extra: list[str] | None = None,
               folder: str = "") -> TestRun:
     """`folder`: run inside one project folder of the workspace (E-126), as you would run that project's tests."""
     cmd = command or ws.test_command
     cwd = ws.path(folder) if folder else ws.root
-    args = cmd.split()
+    args = split_command(cmd)
     if extra:
         if "pytest" not in cmd:
             raise ToolError(f"The test command '{cmd}' is not pytest: run_tests cannot select a file or keyword.")

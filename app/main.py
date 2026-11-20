@@ -3739,12 +3739,36 @@ def _chat():
             r["title"] = titles.get(tid, "")
         note = planner_mod.resume_note(task, path, results, final)
         if spec is not None:
-            mine = specs_mod.you_check(spec)
-            if mine:  # never counted as verified: you say whether they hold
-                note += "\nYou check (not verified by CodeMitra):\n" + "\n".join(f"- {c.id}: {c.text}" for c in mine) + "\n"
-            passed_n = sum(1 for r in results.values() if r.get("status") == "passed")
-            specs_mod.set_status(path, "built" if results and passed_n == len(results) else
-                                 f"in progress: {passed_n} of {len(results)} tasks passed")
+            # Stage 2.3: every criterion's own check once more after the build (a later task may have broken an
+            # earlier one), and the "you check" ones asked: your answer is recorded, never assumed
+            checked = specs_mod.verify(spec, chat.ws) if results else []
+            answers = {}
+            for r in checked:
+                if r["status"] != "you":
+                    continue
+                if session_mode == "auto":
+                    continue  # nobody to ask now: it stays open
+                said = ui.menu.choose(console, f"{r['id']} (yours to check): {r['text'][:160]}",
+                                      [("yes", "Yes, it holds"), ("no", "No, it does not"), ("later", "Later")],
+                                      default="later")
+                if said in ("yes", "no"):
+                    answers[r["id"]] = said
+            line = specs_mod.verdict_line(checked, answers)
+            if checked:
+                note += f"\nCriteria after the build: {line}\n"
+                chat.rec.write("criteria", spec=pathlib.Path(path).name, feature=spec.feature, results=checked,
+                               answers=answers, author="mitra")
+                if answers:
+                    chat.rec.write("criteria_answers", spec=pathlib.Path(path).name, feature=spec.feature,
+                                   answers=answers, author="user")
+            mine_open = [r for r in checked if r["status"] == "you" and r["id"] not in answers]
+            if mine_open:  # never counted as verified
+                note += "You check (not verified by CodeMitra):\n" + "\n".join(
+                    f"- {r['id']}: {r['text']}" for r in mine_open) + "\n"
+            ok_all = bool(checked) and all(r["status"] in ("passed", "you") for r in checked) and \
+                "no" not in answers.values()
+            specs_mod.set_status(path, (f"built: {line}" if ok_all else f"in progress: {line}") if checked
+                                 else "in progress: not built")
         resume_file = pathlib.Path(cfg["workspace"]) / ".codemitra" / "resume.md"
         resume_file.parent.mkdir(parents=True, exist_ok=True)
         resume_file.write_text(note, encoding="utf-8")

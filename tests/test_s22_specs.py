@@ -188,3 +188,90 @@ def test_template_placeholders_are_a_problem():
     """Live 2026-11-20: the 9B kept "<one or two sentences>" from the template in every task."""
     _, p = S.check(SPEC.replace("then the page.", "then the page. <one or two sentences>"))
     assert "placeholders" in p and "<one or two sentences>" in p
+
+
+# ── Stage 2.3: checks are any command; criteria verified after the build; "you check" asked ─────────────────
+
+def test_a_quoted_check_command_stays_whole(tmp_path):
+    (tmp_path / "README.md").write_text("see docs/how_it_works.md\n", encoding="utf-8")
+    ws = T.Workspace(tmp_path)
+    ok = T.run_tests(ws, command="python -c \"assert 'how_it_works' in open('README.md').read()\"")
+    bad = T.run_tests(ws, command="python -c \"assert 'nothing' in open('README.md').read()\"")
+    assert ok.passed and not bad.passed
+
+
+def test_a_program_on_path_is_found_by_its_full_name(monkeypatch):
+    import shutil
+    monkeypatch.setattr(shutil, "which", lambda name: r"C:\tools\npm.cmd" if name == "npm" else None)
+    assert T.split_command("npm test") == [r"C:\tools\npm.cmd", "test"]
+    assert T.split_command("python -m pytest -q")[0] == "python"
+
+
+def test_verify_runs_every_criterion_and_keeps_yours_open(tmp_path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_ac1_docs.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_ac2_link.py").write_text("def test_no():\n    assert False\n", encoding="utf-8")
+    got = S.verify(S.parse(SPEC), T.Workspace(tmp_path))
+    assert [(r["id"], r["status"]) for r in got] == [("AC-1", "passed"), ("AC-2", "failed"), ("AC-3", "you")]
+    assert S.verdict_line(got, {"AC-3": "yes"}) == "AC-1 ✓ · AC-2 ✗ · AC-3 yours: yes"
+    assert S.verdict_line(got) == "AC-1 ✓ · AC-2 ✗ · AC-3 yours: open"
+
+
+def test_an_unattended_spec_run_is_fail_first_and_verified(tmp_path, monkeypatch):
+    from app.core import cli
+    seen = {}
+
+    def fake_run_plan(text, ws, llm, **kw):
+        seen.update(kw)
+        return {"tasks": {}, "passed_tasks": 0, "total_tasks": 2, "final_tests_passed": True, "final_tests": "ok",
+                "needs_help": [], "check_passes": []}
+
+    monkeypatch.setattr(cli, "run_plan", fake_run_plan)
+    monkeypatch.setattr(cli, "get_local_llm", lambda *a, **k: object())
+    monkeypatch.setattr(cli.config, "load", lambda: {})
+    from app import remote
+    monkeypatch.setattr(remote, "check_alive", lambda *a, **k: None)
+    spec_file = tmp_path / "F-001.md"
+    spec_file.write_text(SPEC, encoding="utf-8")
+    cli.cmd_solve(plan=str(spec_file), workspace=str(tmp_path), model="m", as_json=True)
+    assert seen["fail_first"] is True
+    plain = tmp_path / "plain.plan.md"
+    plain.write_text(PLAN_OK, encoding="utf-8")
+    cli.cmd_solve(plan=str(plain), workspace=str(tmp_path), model="m", as_json=True)
+    assert seen["fail_first"] is False  # an old plan without criteria runs as before
+
+
+def test_after_go_the_criteria_are_verified_and_yours_are_asked(harness, monkeypatch):  # noqa: F811
+    state, ws = harness
+    (ws / "codemitra.toml").write_text('architecture = "phased"\n', encoding="utf-8")
+    monkeypatch.setattr(P, "make_spec", lambda llm, task, pack, **k: (SPEC, ""))
+
+    def fake_run_plan(text, w, llm, **kw):  # builds both tests, as the step runner would
+        (w.root / "tests").mkdir(exist_ok=True)
+        for name in ("test_ac1_docs.py", "test_ac2_link.py"):
+            (w.root / "tests" / name).write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        assert kw["fail_first"] is True and kw["record_ctx"]["feature"] == "F-001"
+        return {"tasks": {"T1": {"status": "passed", "tests": "1 passed", "summary": ""},
+                          "T2": {"status": "passed", "tests": "1 passed", "summary": ""}},
+                "passed_tasks": 2, "total_tasks": 2, "final_tests_passed": True, "final_tests": "2 passed",
+                "needs_help": [], "check_passes": []}
+
+    monkeypatch.setattr(L, "run_plan", fake_run_plan)
+    asked = []
+
+    def choose(console, title, options, default=None):
+        asked.append(title)
+        return "yes" if "yours to check" in title else "go"
+
+    monkeypatch.setattr(main.ui.menu, "choose", choose)
+    Inputs.script = ["build a new feature: export the settlements to a PDF report and add a download button in the "
+                     "app, with tests", "exit"]
+    main._chat()
+    assert any(a.startswith("AC-3 (yours to check)") for a in asked)
+    spec_file = next((ws / "specs").glob("F-001-*.md"))
+    assert "Status: built: AC-1 ✓ · AC-2 ✓ · AC-3 yours: yes" in spec_file.read_text(encoding="utf-8")
+    rows = [json.loads(x) for f in (ws / ".codemitra" / "runs").glob("chat-*.jsonl")
+            for x in f.read_text(encoding="utf-8").splitlines() if x.strip()]
+    crit = [r for r in rows if r["kind"] == "criteria"]
+    assert crit and [r["status"] for r in crit[0]["results"]] == ["passed", "passed", "you"]
+    assert [r for r in rows if r["kind"] == "criteria_answers"][0]["author"] == "user"

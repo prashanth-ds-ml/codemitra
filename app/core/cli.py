@@ -81,8 +81,15 @@ def cmd_solve(task: str = "", *, test: str = "python -m pytest -q", plan: str = 
 
     if plan:
         plan_text = Path(plan).read_text(encoding="utf-8")
+        from app.core import specs as specs_mod
+        spec = specs_mod.parse(plan_text)  # Stage 2.3: a spec (it has criteria) runs fail-first, unattended too
         out = run_plan(plan_text, ws, llm, full_test_command=test, max_steps=max_steps, on_event=printer,
-                       record_dir=runs, num_ctx=num_ctx)
+                       record_dir=runs, num_ctx=num_ctx, fail_first=bool(spec.criteria))
+        if spec.criteria:
+            out["criteria"] = specs_mod.verify(spec, ws)
+            out["criteria_line"] = specs_mod.verdict_line(out["criteria"])
+            if not as_json:
+                console.print(Text(f"  criteria: {out['criteria_line']}", style="m.tool"))
         runs.mkdir(parents=True, exist_ok=True)
         (runs / "result.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
         ok = out["final_tests_passed"]

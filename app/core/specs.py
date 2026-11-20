@@ -177,6 +177,34 @@ def missing_packages(spec: Spec, package_info) -> list[str]:
     return out
 
 
+def verify(spec: Spec, ws) -> list[dict]:
+    """Stage 2.3: every criterion's check, run once after the build: {id, text, check, status, summary};
+    status passed | failed | you (yours to judge, never verified here). A later task that broke an earlier
+    criterion shows here, not only in the task that made it pass."""
+    from app.core import tools as T
+    out = []
+    for c in spec.criteria:
+        if c.by_you:
+            out.append({"id": c.id, "text": c.text, "check": YOU_CHECK, "status": "you", "summary": ""})
+            continue
+        run = T.run_tests(ws, command=c.check)
+        out.append({"id": c.id, "text": c.text, "check": c.check, "status": "passed" if run.passed else "failed",
+                    "summary": run.summary})
+    return out
+
+
+def verdict_line(results: list[dict], answers: dict | None = None) -> str:
+    """'AC-1 ✓ · AC-2 ✗ · AC-3 yours: yes' for the spec's Status line and the end of a build."""
+    answers = answers or {}
+    marks = []
+    for r in results:
+        if r["status"] == "you":
+            marks.append(f"{r['id']} yours: {answers.get(r['id'], 'open')}")
+        else:
+            marks.append(f"{r['id']} {'✓' if r['status'] == 'passed' else '✗'}")
+    return " · ".join(marks)
+
+
 def you_check(spec: Spec) -> list[Criterion]:
     return [c for c in spec.criteria if c.by_you]
 
