@@ -346,5 +346,8 @@ def test_the_practice_command_has_the_skill_option():
     import os
     out = subprocess.run([sys.executable, "-c", "from app.main import cli; cli()", "practice", "--help"],
                          capture_output=True, text=True, cwd=ROOT, timeout=60, encoding="utf-8", errors="replace",
-                         env={**os.environ, "PYTHONUTF8": "1", "COLUMNS": "200"}).stdout
-    assert "--skill" in out
+                         env={**os.environ, "PYTHONUTF8": "1", "COLUMNS": "200", "NO_COLOR": "1",
+                              "TERM": "dumb"}).stdout
+    import re
+    plain = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", out)  # CI forces colour: the codes split "--skill" (E-157)
+    assert "--skill" in plain

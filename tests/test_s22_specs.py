@@ -73,6 +73,14 @@ def test_needs_lists_packages():
     assert missing == ["reportlab"]
 
 
+def test_a_project_without_its_own_python_has_nothing_installed(tmp_path, monkeypatch):
+    """E-157 (CI): with no project Python, package_info says "nothing is installed for it": that is missing."""
+    import sys
+    monkeypatch.setattr(T, "project_python", lambda root: sys.executable)
+    spec = S.parse(SPEC.replace("- none", "- fpdf2"))
+    assert S.missing_packages(spec, lambda n: T.package_info(T.Workspace(tmp_path), n)) == ["fpdf2"]
+
+
 def test_save_numbers_specs_and_writes_project_md(tmp_path):
     p1, f1 = S.save(tmp_path, SPEC)
     p2, f2 = S.save(tmp_path, SPEC)

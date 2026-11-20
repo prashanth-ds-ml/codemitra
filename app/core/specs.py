@@ -172,7 +172,8 @@ def missing_packages(spec: Spec, package_info) -> list[str]:
             info = package_info(name)
         except Exception:  # noqa: BLE001
             info = "is not installed"
-        if "not installed" in str(info):
+        # E-157 (CI 2026-11-20): a project with no Python of its own gets "nothing is installed for it"
+        if "not installed" in str(info) or "nothing is installed" in str(info):
             out.append(name)
     return out
 
