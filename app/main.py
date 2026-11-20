@@ -3146,7 +3146,15 @@ def _chat():
                                          [("approve", "Yes"), ("deny", "No")], fallback_default="approve")
         return choice == "approve"
 
-    def _chat_shell(command):
+    def _chat_shell(command, approved: bool = False):
+        from app.core.score import is_install
+        if is_install(command) and not approved and session_mode == "auto":
+            # E-154: auto mode runs commands without asking; installing packages changes your environment, so it
+            # is always asked (ask mode already asks for every command)
+            said = ui.menu.choose(console, f"CodeMitra wants to install packages: `{command[:160]}`. Allow it?",
+                                  [("yes", "Yes, install"), ("no", "No")], default="no")
+            if said != "yes":
+                return "✗ Not run: the user declined the install. Tell them which library is needed.", False
         console.print(ui.shell_start(command))
         result = shell_agent.execute(command=command, cwd=None, console=console)
         console.print(ui.shell_done(result))
@@ -3652,7 +3660,15 @@ def _chat():
         spec = specs_mod.parse(text, fid)
         console.print(Text(f"  ✓ approved: {path.relative_to(pathlib.Path(cfg['workspace'])).as_posix()}",
                            style="m.tool"))
-        _offer_installs(spec)  # E-152: a library the spec needs is installed (on your OK) before any step runs
+        still = _offer_installs(spec=spec)  # E-152: a library the spec needs is installed (your OK) before any step
+        if still and choice == "go":
+            # E-155 (live 2026-11-20): built without fpdf2, the 9B wrote AC-1's test as "raises ImportError when fpdf
+            # is not installed", which fails first and then passes: a criterion met by the missing library itself
+            rel = path.relative_to(pathlib.Path(cfg["workspace"])).as_posix()
+            console.print(Text(f"  not building yet: install {', '.join(still)} first, then `/run {rel}` (the spec is "
+                               "saved)", style="m.info"))
+            specs_mod.set_status(path, f"waiting: install {', '.join(still)}")
+            return {"outcome": "needs_env", "choice": "go", "rounds": rounds, "feature": fid, "needs": still}
         if choice == "save":
             rel = path.relative_to(pathlib.Path(cfg["workspace"])).as_posix()
             console.print(Text(f"  saved · `/run {rel} 4` builds it unattended", style="m.tool"))
@@ -3661,23 +3677,25 @@ def _chat():
         return {"outcome": "tests_passed" if done["ok"] else "tests_failed", "choice": "go", "rounds": rounds,
                 "steps_passed": done["passed"], "steps_total": done["total"], "feature": fid}
 
-    def _offer_installs(spec) -> list[str]:
-        """Stage 2.2 (E-152): the spec's `## Needs` libraries that the project's Python lacks; each is installed
-        only on your OK (pip into the project's own Python). Returns what is still missing."""
+    def _offer_installs(spec=None, names=None, why: str = "The spec needs") -> list[str]:
+        """Stage 2.2 / 2.4 (E-152): libraries the project's Python lacks (the spec's `## Needs`, or `names` from a
+        task that stopped on one); each is installed only on your OK (pip into the project's own Python).
+        Returns what is still missing."""
         from app.core import specs as specs_mod
         from app.core import tools as tools_mod
-        missing = specs_mod.missing_packages(spec, lambda name: tools_mod.package_info(chat.ws, name))
+        missing = list(names) if names is not None else \
+            specs_mod.missing_packages(spec, lambda name: tools_mod.package_info(chat.ws, name))
         still = []
         for name in missing:
             py = tools_mod.project_python(chat.ws.root)
-            answer = ui.menu.choose(console, f"The spec needs `{name}`, which is not installed. Install it?",
+            answer = ui.menu.choose(console, f"{why} `{name}`, which is not installed. Install it?",
                                     [("yes", f"Yes: {pathlib.Path(py).name} -m pip install {name}"),
                                      ("no", "No: I will install it (the steps that need it will fail)")],
                                     default="yes")
             if answer != "yes":
                 still.append(name)
                 continue
-            out, ok = _chat_shell(f'"{py}" -m pip install {name}')
+            out, ok = _chat_shell(f'"{py}" -m pip install {name}', approved=True)  # you just said yes
             if not ok:
                 still.append(name)
         if still:
@@ -3709,9 +3727,34 @@ def _chat():
                                     on_event=EventPrinter(console), record_dir=record_dir, num_ctx=num_ctx,
                                     git=False, harness=harness, record_ctx=_plan_ctx, fail_first=spec is not None)
             results, final = dict(out["tasks"]), out["final_tests"]
+            env = dict(out.get("needs_env") or {})
+            if env:  # Stage 2.4 (E-152): a task stopped on a missing library: install it (your OK), run those again
+                still = _offer_installs(names=sorted(set(env.values())), why="A step needs")
+                ready = {tid for tid, mod in env.items() if mod not in still}
+                if ready:
+                    again = [t for t in tasks if t.id in ready or (t.id not in results and t.id not in env)]
+                    ids = {t.id for t in again}  # a need that already passed is met: keep only needs rerun now
+
+                    def _needs_now(body):
+                        return re.sub(r"(?m)^(\s*-\s*Needs:).*$", lambda m: m.group(1) + " " + (", ".join(
+                            n for n in re.findall(r"T\d+", m.group(0)) if n in ids) or "-"), body)
+                    sub = "## Tasks\n\n" + "\n\n".join(f"### {t.id}: {t.title}\n{_needs_now(t.body)}" for t in again)
+                    console.print(Text(f"  ▶ running {', '.join(t.id for t in again)} again with the library "
+                                       "installed", style="m.tool"))
+                    # their checks already failed before their work: no fail-first on the rerun
+                    out3 = loop_mod.run_plan(sub, chat.ws, local_llm, full_test_command="python -m pytest -q",
+                                             on_event=EventPrinter(console), record_dir=record_dir, num_ctx=num_ctx,
+                                             git=False, harness=harness, record_ctx={**_plan_ctx, "after_install": True})
+                    results.update(out3["tasks"])
+                    final = out3["final_tests"]
+                    env = dict(out3.get("needs_env") or {})
             failed = {tid: f"{r.get('tests', '')} · {str(r.get('summary', ''))[:300]}"
-                      for tid, r in results.items() if r.get("status") != "passed"}
-            failed.update({t.id: "skipped: it needed a step that failed" for t in tasks if t.id not in results})
+                      for tid, r in results.items() if r.get("status") not in ("passed", "needs_env")}
+            failed.update({t.id: "skipped: it needed a step that failed" for t in tasks
+                           if t.id not in results and not env})
+            if env:
+                console.print(Text(f"  ⚠ still needs installing: {', '.join(sorted(set(env.values())))} "
+                                   "(the steps that need it keep their work; `/run` the spec again after)", style="m.info"))
             if failed:
                 console.print(Text(f"  ↻ {len(failed)} step(s) did not pass: re-planning them once, smaller …",
                                    style="m.info"))

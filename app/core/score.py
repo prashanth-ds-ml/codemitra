@@ -197,10 +197,24 @@ def _stream(chunks, step: int = 1, cancelled: Callable[[], bool] = lambda: False
                            first_s=first, seconds=time.monotonic() - t0, thinking="x" * think)
 
 
+_INSTALL = re.compile(r"(^|[\s\"'/\\])(pip3?|uv|conda|poetry|npm|pnpm|yarn)(\.exe)?[\"']?\s+(-m\s+pip\s+)?"
+                      r"(install|add|i)\b|-m\s+pip\s+install\b", re.I)
+
+
+def is_install(cmd: str) -> bool:
+    """A command that installs packages (pip / uv / conda / poetry / npm / yarn install or add)."""
+    return bool(_INSTALL.search(cmd or ""))
+
+
 def _run_shell(ws: Path) -> Callable[[str], tuple[str, bool]]:
     """The chat's own shell runner (allow-list, policy, no pipes, no inline code, the project's Python), inside the
     case's workspace: a score measures what a user gets (E-131: it ran `shell=True` with no checks at all)."""
     def run(cmd: str) -> tuple[str, bool]:
+        if is_install(cmd):
+            # E-154 (Stage 2.4 live check 2026-11-20): with nobody to approve, `pip install fpdf` went into this
+            # machine's system Python. A run never installs: the model must say the library is needed
+            return ("✗ Not run: installing packages is off in this run (nobody is here to approve it). Tell the user "
+                    "which library is needed and that it must be installed."), False
         from app.agents import shell
         shell.configure(workspace=str(ws), allowed_roots=[str(ws)], session_mode="auto",
                         default_timeout=SHELL_TIMEOUT_S, stream_to_console=False)

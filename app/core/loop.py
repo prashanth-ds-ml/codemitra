@@ -20,6 +20,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from app.agents.limits import RepeatGuard
 from app.core import harness as H
+from app.core import finish_gate as FG
 from app.core import tools as T
 from app.core.parse import for_model, text_tool_calls
 from app.core.scrub import scrub_obj
@@ -59,9 +60,10 @@ class RunResult:
     seconds: float = 0.0
     changed: list[str] = field(default_factory=list)
     record_path: str = ""
+    needs: str = ""  # Stage 2.4: the library the task needs installed (status "needs_env")
 
     def to_json(self) -> dict:
-        return {"status": self.status, "summary": self.summary, "steps": self.steps,
+        return {"status": self.status, "summary": self.summary, "steps": self.steps, "needs": self.needs,
                 "tests_passed": bool(self.tests and self.tests.passed),
                 "tests": self.tests.summary if self.tests else "", "tokens_in": self.tokens_in,
                 "tokens_out": self.tokens_out, "seconds": round(self.seconds, 1), "changed": self.changed,
@@ -323,6 +325,7 @@ def solve(
     known = {s["name"] for s in specs}
     guard = RepeatGuard(max_repeats=h.limit("max_repeats"), max_failures=h.limit("max_failures"))
     failed_finishes = empty_replies = failing_runs = 0
+    declared = FG.declared_libraries(task + "\n" + context)  # Stage 2.4: libraries the task / spec name
     round_no = 1
     if ws.journal is None:
         ws.journal = []
@@ -339,7 +342,9 @@ def solve(
         emit(Event("note", {"text": f"fresh round {round_no}: {reason}"}))
 
     def finish_with(status: str, summary: str) -> RunResult:
-        if status != "passed" and rollback:
+        # Stage 2.4: a task stopped by a missing library keeps its work (the test and code are right; only the
+        # setup is missing), so it can run again after the install
+        if status not in ("passed", "needs_env") and rollback:
             undone = T.rollback(ws.journal[journal_start:])
             del ws.journal[journal_start:]
             if undone:
@@ -424,6 +429,12 @@ def solve(
                 if run.passed:
                     messages.append(ToolMessage(content="Tests pass. Done.", tool_call_id=tc["id"]))
                     return finish_with("passed", str(args.get("summary") or text or "Tests pass."))
+                module = FG.missing_module(run.output, ws.root, declared=declared)
+                if module:  # Stage 2.4 / E-152: the setup, not the code: stop now, keep the work, name the library
+                    rec.write("gate", check="environment", step=step, module=module)
+                    result.needs = module
+                    return finish_with("needs_env", f"`{module}` is not installed for the project's Python: install "
+                                                    f"it, then run this task again ({run.summary}).")
                 failed_finishes += 1
                 messages.append(ToolMessage(content=(
                     f"✗ Not done: the tests still fail ({run.summary}).\n\n{run.output}\n\nFix the code and run_tests."),
@@ -447,6 +458,14 @@ def solve(
                       seconds=tool_s)
             if len(output) > 4000:
                 rec.tool_output(output, step=step, name=name)
+            module = FG.missing_module(output, ws.root, declared=declared) if name == "run_tests" and not ok else ""
+            if module:  # Stage 2.4 / E-152 (live: 3 rounds of retries on a missing fpdf): stop at the first sight
+                messages.append(ToolMessage(content=output, tool_call_id=tc["id"]))
+                rec.write("gate", check="environment", step=step, module=module)
+                result.needs = module
+                result.tests = run
+                return finish_with("needs_env", f"`{module}` is not installed for the project's Python: install it, "
+                                                f"then run this task again.")
             messages.append(ToolMessage(content=output, tool_call_id=tc["id"]))
             if run is not None:
                 result.tests = run
@@ -580,6 +599,9 @@ def run_plan(plan_text: str, ws: T.Workspace, llm, *, full_test_command: str, ma
                        | set(res.changed))
         if res.status == "passed" and branch:
             commits[task.id] = commit_task(ws, files, f"codemitra: {task.id} {task.title}")
+        elif res.status == "needs_env":
+            helps.append(f"### {task.id}: {task.title}: needs `{res.needs}` installed\n- {res.summary}\n"
+                         f"- Its work is kept: {', '.join(files) or 'no files'}\n")
         elif res.status != "passed":
             helps.append(needs_help(task, res, files))
     ws.test_command = full_test_command
@@ -590,6 +612,7 @@ def run_plan(plan_text: str, ws: T.Workspace, llm, *, full_test_command: str, ma
               "total_tasks": len(tasks), "final_tests_passed": final.passed, "final_tests": final.summary,
               "needs_help": helps, "branch": branch, "commits": commits,
               "check_passes": [k for k, v in results.items() if v.status == "check_passes"],
+              "needs_env": {k: v.needs for k, v in results.items() if v.status == "needs_env"},
               "seconds": round(time.monotonic() - t0), "tokens_in": sum(v.tokens_in for v in results.values()),
               "tokens_out": sum(v.tokens_out for v in results.values())}
     if record_dir:

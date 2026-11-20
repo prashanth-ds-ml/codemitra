@@ -23,6 +23,7 @@ from app.core import harness as H
 from app.core import loop as core_loop
 from app.core import signals as SIG
 from app.core import tools as T
+from app.core import finish_gate as FG
 from app.core import turnfacts as TF
 from app.core.parse import for_model, text_tool_calls
 from app.core import runinfo
@@ -794,6 +795,7 @@ class ChatSession:
         self.rec.ctx["session_id"] = self.session_id
         self.work = {"spec": "", "feature": "", "task_id": ""}  # Stage 1.2: what the turn belongs to (filled in Stage 2)
         self._used = {"skills": [], "mcp": [], "lessons": []}  # Stage 1.6, per turn
+        self._gate_done: set = set()  # Stage 2.4, per turn (reset at turn start)
         self._snap_cache: dict = {}   # Stage 1.4: file hashes by (size, mtime), so a snapshot rereads only changes
         self._last_end_wall = 0.0     # Stage 1.7: when the last turn ended (your time = the gap to the next start)
         self._session_changed: set[str] = set()  # Stage 1.5: files changed by any turn of this session
@@ -911,6 +913,7 @@ class ChatSession:
         time since the last turn ended (your time), the clocks for model and tool time, the used lists."""
         from app.core import runinfo
         self.rec.seen = []
+        self._gate_done: set = set()  # Stage 2.4: the finish gate's checks already used this turn
         self._turn_tools_s, self._model_s0 = 0.0, self.rec.model_s
         self._used = {"skills": [], "mcp": [], "lessons": []}
         self._wait_s = round(time.time() - self._last_end_wall, 1) if self._last_end_wall else None
@@ -1392,6 +1395,56 @@ class ChatSession:
             acted = _merged(acted, more)
         return acted
 
+    def _finish_gate(self, text: str, res: TurnResult, step: int) -> str:
+        """Stage 2.4: the change phase's answer passes every check in FG.ORDER, or gets the first failing check's
+        note (each check once per turn, at most FG.MAX_REFUSALS refusals). Returns the note, or "" to accept.
+        Each refusal is recorded as a `gate` row (and its older row kind, which the mistake tags read)."""
+        done: set = self._gate_done
+        if len(done) >= FG.MAX_REFUSALS:
+            return ""
+        request = self._prev_user_full or ""
+
+        def refuse(check: str, note: str, legacy: str = "", **detail) -> str:
+            done.add(check)
+            self.rec.write("gate", turn=self.turn_no, step=step, check=check, **detail)
+            if legacy:
+                self.rec.write(legacy, turn=self.turn_no, step=step, **detail)
+            return note
+
+        if "no_work" not in done and not res.journal and (
+                promises_action(text) or claims_made(text) or says_cannot(text)):
+            # E-133: "I'll create query.sql now" with nothing written; E-143: "I've created marks.xlsx" / "I can't"
+            kind = "promise" if promises_action(text) else "nothing_written"
+            return refuse("no_work", CHANGE_PROMISE_NOTE if kind == "promise" else NOTHING_WRITTEN_NOTE, kind,
+                          text=text[-300:])
+        outputs = wants_output_file(request)
+        unrun = getattr(self, "_unrun_script", "")
+        if "script_not_run" not in done and unrun and outputs:
+            # E-145: "in inventory.xlsx add a column": a script written, never run, "done"
+            return refuse("script_not_run", SCRIPT_NOT_RUN_NOTE.format(
+                script=Path(unrun).as_posix(), what=", ".join(f"`{o}`" for o in outputs[:3])), "script_not_run",
+                script=unrun, outputs=outputs[:4])
+        runs = [(n, ok, out) for n, ok, out in self.turn_tools if n in ("run_tests", "run_command")]
+        module = FG.missing_module(runs[-1][2], self.ws.root, declared=FG.declared_libraries(request)) if runs and not runs[-1][1] else ""
+        if "environment" not in done and module:
+            # E-152: a missing library looked like failing code; retrying the code cannot fix it
+            return refuse("environment", FG.env_note(module), module=module)
+        if "tests_failed" not in done and res.last_test_ok is False:
+            said = grounding.claims(text, self.turn_tools, changed=bool(res.journal))
+            if any(c["verdict"] == "false" and c["kind"] in ("tests", "done", "runs") for c in said):
+                return refuse("tests_failed", FG.tests_failed_note(res.last_test_summary),
+                              summary=res.last_test_summary[:200])
+        gone = missing_outputs(text, self.ws.root) if "missing_output" not in done else []
+        if gone:  # E-144: "Created `expenses.xlsx`" with no such file
+            scripts = [Path(e["path"]).name for e in res.journal if str(e.get("path", "")).endswith(".py")]
+            return refuse("missing_output", missing_note(gone, scripts), "missing_output", files=gone[:6])
+        bad = FG.broken_json(res.journal, self.ws.root) if "broken_json" not in done else []
+        if bad:
+            return refuse("broken_json", FG.json_note(bad), files=[b[0] for b in bad[:6]])
+        if "recheck" not in done and res.journal and FG.wants_recheck(request) and not asks_only(request):
+            return refuse("recheck", FG.recheck_note(request))
+        return ""
+
     def _turn_skills(self, phase: str) -> str:
         """v0.9.0 F-2: the skills that fit this request in this phase, as text for the phase note; each one once per
         turn, each use recorded (which skill, which phase) for the with / without comparison."""
@@ -1654,10 +1707,7 @@ class ChatSession:
         conn_retried = False
         slow_retried = False
         runaway_retried = False
-        empty_nudged = False
-        promise_nudged = False
-        missing_nudged = False  # E-144: an answer naming an output file that does not exist, once per turn
-        script_nudged = False   # E-145: a script written for an output file but not run, once per turn
+        empty_nudged = False  # the end-of-turn checks (E-133/E-143/E-144/E-145) are the finish gate (Stage 2.4)
         for step in range(1, max_steps + 1):
             if self.cancelled:
                 res.stopped, res.stop_reason = True, "cancelled (timed out)"
@@ -1786,38 +1836,12 @@ class ChatSession:
                 self.rec.write("empty_answer", turn=self.turn_no, step=step)
                 messages.append(HumanMessage(content=EMPTY_ANSWER_NOTE))
                 continue
-            if (not reply.tool_calls and not promise_nudged and not self.deciding and not last and step < max_steps
-                    and self.last_phase == "make_change" and not res.journal
-                    and (promises_action(streamed.text) or claims_made(streamed.text) or says_cannot(streamed.text))):
-                # E-133: in the change phase it said "I'll create query.sql now" and stopped with nothing written;
-                # E-143: or "I've created marks.xlsx" / "I can't create files" with nothing written
-                promise_nudged = True
-                kind = "promise" if promises_action(streamed.text) else "nothing_written"
-                self.rec.write(kind, turn=self.turn_no, step=step, text=(streamed.text or "")[-300:])
-                messages.append(AIMessage(content=reply.content or streamed.text or ""))
-                messages.append(HumanMessage(content=CHANGE_PROMISE_NOTE if kind == "promise" else NOTHING_WRITTEN_NOTE))
-                continue
-            outputs = wants_output_file(self._prev_user_full)
-            unrun_script = getattr(self, "_unrun_script", "")
-            if (not reply.tool_calls and not script_nudged and unrun_script and outputs and not self.deciding
-                    and not last and step < max_steps and self.last_phase == "make_change"):
-                # E-145 (xlsx practice 2026-11-18, inventory-value 0/4): "in inventory.xlsx add a column": it wrote a
-                # script, never ran it, and said done; the file existed, so E-144 could not see it
-                script_nudged = True
-                self.rec.write("script_not_run", turn=self.turn_no, step=step, script=unrun_script, outputs=outputs[:4])
-                messages.append(AIMessage(content=reply.content or streamed.text or ""))
-                messages.append(HumanMessage(content=SCRIPT_NOT_RUN_NOTE.format(
-                    script=Path(unrun_script).as_posix(), what=", ".join(f"`{o}`" for o in outputs[:3]))))
-                continue
-            if (not reply.tool_calls and not missing_nudged and not self.deciding and not last and step < max_steps
+            if (not reply.tool_calls and not self.deciding and not last and step < max_steps
                     and self.last_phase == "make_change"):
-                gone = missing_outputs(streamed.text, self.ws.root)
-                if gone:  # E-144: "Created `expenses.xlsx`" with no such file (the script was written, not run)
-                    missing_nudged = True
-                    scripts = [Path(e["path"]).name for e in res.journal if str(e.get("path", "")).endswith(".py")]
-                    self.rec.write("missing_output", turn=self.turn_no, step=step, files=gone[:6])
+                refused = self._finish_gate(streamed.text or "", res, step)
+                if refused:  # Stage 2.4: one gate, checks in order, each once, every refusal names the next action
                     messages.append(AIMessage(content=reply.content or streamed.text or ""))
-                    messages.append(HumanMessage(content=missing_note(gone, scripts)))
+                    messages.append(HumanMessage(content=refused))
                     continue
             messages.append(reply)
             if not reply.tool_calls:

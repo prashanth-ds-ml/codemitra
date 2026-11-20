@@ -36,6 +36,11 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Stage 2.4 live check: the finish gate (2026-11-20, Kaggle T4, qwen3.5 9B, Trip_splitter copies)
+- **Step runner, PDF spec, fpdf2 not installed, install offer skipped by the check script:** the spec named fpdf2 under Needs (21 s). Run: 2/2 "passed" in 359 s (T1 7 steps, T2 32 steps), no needs_env, because the 9B wrapped the import (`raise ImportError("fpdf2 is required ...")`) and wrote AC-1's test as "raises ImportError when fpdf is not installed" (E-155). Fix: a spec whose libraries are missing is not built (F-147).
+- **Chat change phase, "make report.pdf with the fpdf library and run it" (benchmark runner, no one to approve):** the model ran `pip install fpdf` itself and it went into this machine's system Python (E-154, uninstalled the same hour); then it ran the script 4 times and made report.pdf (293 s). No gate fired: the library was there by then. Fix: runs never install; the chat asks before any install, also in auto mode (F-146).
+- The gate's own checks are proven by unit tests only so far; none fired live in this check.
+
 ## Stage 2.2 live check: specs + fail-first (2026-11-20, Kaggle T4, qwen3.5 9B, Trip_splitter copies)
 | Request | Spec | Build | Result |
 |---|---|---|---|
