@@ -17,7 +17,7 @@ from typing import Callable
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.agents.limits import RepeatGuard
+from app.agents.limits import LoopGuard
 from app.core import grounding
 from app.core import harness as H
 from app.core import loop as core_loop
@@ -1701,8 +1701,9 @@ class ChatSession:
         if self.deciding:  # D-071 phased: talk, or pick a phase; no real tools yet
             specs = list(PHASE_SPECS)
         bound = self.llm.bind_tools(specs) if specs else self.llm  # the reply path: no tools at all (D-068)
-        guard = RepeatGuard(max_repeats=self.harness.limit("max_repeats"),
-                            max_failures=self.harness.limit("max_failures"))
+        # Stage 2.5: RepeatGuard + Mingbird's ladder (change strategy, streak nudge, tool off, read loop, edit loop)
+        guard = LoopGuard(max_repeats=self.harness.limit("max_repeats"),
+                          max_failures=self.harness.limit("max_failures"))
         bad_calls = 0
         conn_retried = False
         slow_retried = False
@@ -1872,6 +1873,8 @@ class ChatSession:
                     stop = "cancelled (timed out)"
                     continue
                 refused = guard.before(name, args)
+                if refused and guard.last:  # Stage 2.5: a turned-off tool or a re-reading loop
+                    self.rec.write("loop_guard", turn=self.turn_no, step=step, check=guard.last, tool=name)
                 self._last_tool_s = 0.0  # Stage 1.3: stays 0 when the tool is refused or answered without running
                 if name in PHASE_NEXT.get(self.last_phase or "", ()) and self.path == "phased" and not refused:
                     # E-114 (Phase 1 score, B9): asked to change something, the 9B looked first, found the line,
@@ -1905,8 +1908,12 @@ class ChatSession:
                 self.hooks.show(name, args, out, ok)
                 self.turn_tools.append((name, ok, out))
                 self._tool_row(step, name, args, ok, out)
-                messages.append(ToolMessage(content=out + self._deep_progress(name, ok) + self._nothing_to_read(name, out),
-                                            tool_call_id=tc["id"]))
+                ladder = guard.hint(name, args, out, ok)  # Stage 2.5: the ladder's next-step hint, if one fired
+                if ladder:
+                    self.rec.write("loop_guard", turn=self.turn_no, step=step, check=guard.last, tool=name,
+                                   path=str(args.get("path", ""))[:200])
+                messages.append(ToolMessage(content=out + self._deep_progress(name, ok) + self._nothing_to_read(name, out)
+                                            + ladder, tool_call_id=tc["id"]))
                 if ok and name in CHANGE_TOOLS:
                     self._last_auto = None  # something changed: the next run_tests really runs
                     if not str(args.get("path", "")).lower().endswith(NO_TEST_EXT):
@@ -1920,6 +1927,8 @@ class ChatSession:
             if changed_now:  # D-078 #2: the tests run after every change, and the model sees the result
                 changed_now = False
                 note = self._test_after_change(res, step)
+                if res.last_test_ok:
+                    guard.tests_passed()  # Stage 2.5: progress: the edit counts start again
                 if note:
                     messages.append(HumanMessage(content=note))
         return self._wrap_up(messages, res, f"step limit ({max_steps} model calls)")

@@ -139,7 +139,7 @@ def mistake_tags(*, claims_verdict: str, asked_change: bool, did_work: bool, las
     runs = [out for name, _, out in tools if name in ("run_command", "run_tests")]
     if runs and any(e in runs[-1] for e in ("SyntaxError", "NameError", "ImportError", "IndentationError")):
         tags.append("broken_code")
-    if {"repeat", "runaway"} & set(kinds):
+    if {"repeat", "runaway", "loop_guard"} & set(kinds):  # Stage 2.5: the ladder fired
         tags.append("loop")
     failed = sum(1 for _, ok, _ in tools if not ok) + kinds.count("bad_tool_call")
     if failed >= 3:

@@ -13,5 +13,6 @@ changed (shortened and rewritten for small local models).
 | Part | Adapted from | License | Upstream commit |
 |---|---|---|---|
 | The finish gate (`app/core/finish_gate.py`, `ChatSession._finish_gate`, the step runner's environment stop) | [Mingbird/Mingbird-agent](https://github.com/Mingbird/Mingbird-agent) `ollama_agent.py` finish gate (checks in order, each capped, every refusal names the next action, questions exempt). Rewritten for CodeMitra: our own check list and notes, no code copied verbatim | Apache-2.0, Copyright the Mingbird authors | db9897f (v3.1.11) |
+| The anti-loop ladder (`LoopGuard` in `app/agents/limits.py`) | Mingbird `ollama_agent.py` agent_loop ladder and `_EditConvergenceGuard` (failures -> strategy hint, streak nudge, tool off, read window, edit convergence). Rewritten for CodeMitra, no code copied verbatim | Apache-2.0, Copyright the Mingbird authors | db9897f (v3.1.11) |
 
 The practice tasks for these skills (`app/core/skill_tasks.py`) are CodeMitra's own. Skills are added one at a time (2026-11-18): verify-before-done, writing-tests and debugging (adapted from obra/superpowers, MIT) were taken out until their turn; their tasks stay.

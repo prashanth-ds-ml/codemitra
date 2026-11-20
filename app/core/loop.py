@@ -18,7 +18,7 @@ from typing import Callable
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.agents.limits import RepeatGuard
+from app.agents.limits import LoopGuard
 from app.core import harness as H
 from app.core import finish_gate as FG
 from app.core import tools as T
@@ -323,20 +323,26 @@ def solve(
     messages: list = [SystemMessage(content=system_prompt), HumanMessage(content=user)]
     bound = llm.bind_tools(specs)
     known = {s["name"] for s in specs}
-    guard = RepeatGuard(max_repeats=h.limit("max_repeats"), max_failures=h.limit("max_failures"))
+    guard = LoopGuard(max_repeats=h.limit("max_repeats"), max_failures=h.limit("max_failures"))  # Stage 2.5
     failed_finishes = empty_replies = failing_runs = 0
     declared = FG.declared_libraries(task + "\n" + context)  # Stage 2.4: libraries the task / spec name
+    last_ladder = ""  # Stage 2.5: the newest ladder hint, carried into a fresh round
     round_no = 1
     if ws.journal is None:
         ws.journal = []
     journal_start = len(ws.journal)
 
     def fresh_round(reason: str) -> None:
-        nonlocal messages, guard, failing_runs, round_no
+        nonlocal messages, guard, failing_runs, round_no, last_ladder
         round_no += 1
         note = handoff_note(task, ws, result.tests, round_no, reason)
+        if last_ladder:  # Stage 2.5 (live): the hint fired as the round ended; it must not be lost with the history
+            note += "\n\nFrom the last round:" + last_ladder
+            last_ladder = ""
         messages = [SystemMessage(content=system_prompt), HumanMessage(content=note)]
-        guard = RepeatGuard(max_repeats=h.limit("max_repeats"), max_failures=h.limit("max_failures"))
+        edits = dict(guard.edits)  # Stage 2.5 (live: utils.py changed 7 times across rounds, no hint): per task
+        guard = LoopGuard(max_repeats=h.limit("max_repeats"), max_failures=h.limit("max_failures"))
+        guard.edits = edits
         failing_runs = 0
         rec.write("fresh_round", round=round_no, reason=reason)
         emit(Event("note", {"text": f"fresh round {round_no}: {reason}"}))
@@ -466,7 +472,13 @@ def solve(
                 result.tests = run
                 return finish_with("needs_env", f"`{module}` is not installed for the project's Python: install it, "
                                                 f"then run this task again.")
-            messages.append(ToolMessage(content=output, tool_call_id=tc["id"]))
+            ladder = guard.hint(name, args, output, ok)  # Stage 2.5: the ladder's next-step hint, if one fired
+            last_ladder = ladder or last_ladder
+            if ladder:
+                rec.write("loop_guard", step=step, check=guard.last, tool=name, path=str(args.get("path", ""))[:200])
+            elif refused and guard.last:
+                rec.write("loop_guard", step=step, check=guard.last, tool=name)
+            messages.append(ToolMessage(content=output + ladder, tool_call_id=tc["id"]))
             if run is not None:
                 result.tests = run
                 emit(Event("tests", {"passed": run.passed, "summary": run.summary}))

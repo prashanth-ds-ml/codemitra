@@ -36,6 +36,15 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Stage 2.5 live check: the loop guard (2026-11-20, Kaggle T4, qwen3.5 9B, the PDF feature spec on a Trip_splitter copy with its own .venv and fpdf2)
+| Run | Code | Tasks | Steps | Ladder fired | Criteria after |
+|---|---|---|---|---|---|
+| morning (2.4 check, fpdf2 missing) | before 2.5 | 2/2 "passed" (gamed, E-155) | T1 7, T2 32 (8 rewrites of its test) | - | - |
+| 1 | 2.5 | 0/2 | T1 23 (3 rounds) | change_strategy x3 (run_tests) | AC-1 ✗ AC-2 ✗ |
+| 2 | + F-150, F-151 | **2/2** | T1 18, T2 19 | T1: change_strategy x4; T2: streak x2, edit_loop on its test file, change_strategy | **AC-1 ✓ AC-2 ✓** AC-3 yours |
+
+Run 1 failed on CodeMitra, not the model: package_info told it fpdf2 was broken (E-158) and a missing test file gave no hint (E-159). Run 2: utils.py really imports fpdf, no ImportError-style test. One run per code version: a direction, not a rate. Found in run 2: hints lost at a fresh round, edit counts reset per round (E-160).
+
 ## Stage 2.4 live check: the finish gate (2026-11-20, Kaggle T4, qwen3.5 9B, Trip_splitter copies)
 - **Step runner, PDF spec, fpdf2 not installed, install offer skipped by the check script:** the spec named fpdf2 under Needs (21 s). Run: 2/2 "passed" in 359 s (T1 7 steps, T2 32 steps), no needs_env, because the 9B wrapped the import (`raise ImportError("fpdf2 is required ...")`) and wrote AC-1's test as "raises ImportError when fpdf is not installed" (E-155). Fix: a spec whose libraries are missing is not built (F-147).
 - **Chat change phase, "make report.pdf with the fpdf library and run it" (benchmark runner, no one to approve):** the model ran `pip install fpdf` itself and it went into this machine's system Python (E-154, uninstalled the same hour); then it ran the script 4 times and made report.pdf (293 s). No gate fired: the library was there by then. Fix: runs never install; the chat asks before any install, also in auto mode (F-146).

@@ -192,8 +192,21 @@ try:
     out["version"], out["summary"] = d.version, (d.metadata.get("Summary") or "")
 except md.PackageNotFoundError:
     out["version"] = None
+target = name.replace("-", "_")
+if out.get("version"):
+    # E-158 (live 2026-11-20): the package fpdf2 installs the module fpdf; importing "fpdf2" failed and the model
+    # spent two rounds "fixing" a library that was fine. Import what the package really provides.
+    mods = []
+    try:
+        mods = [m for m, ds in md.packages_distributions().items() if dist_name.lower() in (x.lower() for x in ds)]
+    except Exception:
+        pass
+    mods = [m for m in mods if not m.startswith("_")]
+    if mods and target not in mods and "." not in name:
+        target = sorted(mods, key=len)[0]
+        out["module"] = target
 try:
-    m = importlib.import_module(name.replace("-", "_"))
+    m = importlib.import_module(target)
     out["file"] = getattr(m, "__file__", "") or ""
     out["version"] = out.get("version") or str(getattr(m, "__version__", "") or "") or None
     out["doc"] = "\n".join((inspect.getdoc(m) or "").splitlines()[:6])
@@ -232,6 +245,9 @@ def package_info(ws: Workspace, name: str) -> str:
                 f"`pip install {name.split('.')[0]}` (it goes into the project's Python), or use what is installed.")
     lines = [f"{name} {info.get('version') or '(version unknown)'} · installed for {where}"
              + (f" · {info['summary']}" if info.get("summary") else "")]
+    if info.get("module"):  # E-158: the package's import name is not its install name
+        lines.append(f"Import it as `import {info['module']}` (the package {name} provides the module "
+                     f"{info['module']}; `import {name}` does not exist).")
     if info.get("import_error"):
         lines.append(f"Installed, but importing it failed: {info['import_error']}")
     if info.get("doc"):
@@ -700,6 +716,10 @@ class TestRun:
 def test_args(ws: Workspace, path: str = "", keyword: str = "", first_failure: bool = False) -> list[str]:
     """Extra pytest arguments for one file / a selection (A3); paths must stay inside the workspace."""
     extra = []
+    if re.search(r"\b(pip|install|uv|conda)\b", str(keyword or "")):
+        # E-159 (live): `run_tests -k "pip install fpdf2"`: run_tests runs tests, it installs nothing
+        raise ToolError("run_tests runs the tests; it cannot install anything. A missing library has to be installed "
+                        "by the user: say which one.")
     if path:
         extra.append(ws.rel(ws.path(path)))
     if keyword:
@@ -756,6 +776,10 @@ def run_tests(ws: Workspace, command: str | None = None, extra: list[str] | None
         f.write_text(out, encoding="utf-8")
         full_path = str(f)
     shown = failing_part(out, ok)
+    gone = re.search(r"(?:file or directory not found|no such file or directory):\s*(\S+)", out, re.I) if not ok else None
+    if gone:  # E-159 (live 2026-11-20): 3 runs of a test-first task's check before its test was written
+        shown += (f"\n\nThe test file `{gone.group(1)}` does not exist yet. If your task is to write it (test first), "
+                  "write it now with write_file, then run it.")
     if len(shown) > MAX_OUTPUT_CHARS:
         head, tail = shown[: MAX_OUTPUT_CHARS // 3], shown[-(MAX_OUTPUT_CHARS * 2 // 3):]
         shown = f"{head}\n… {len(shown) - len(head) - len(tail)} characters cut …\n{tail}"
