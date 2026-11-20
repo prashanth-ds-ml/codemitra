@@ -3812,6 +3812,11 @@ def _chat():
                 "no" not in answers.values()
             specs_mod.set_status(path, (f"built: {line}" if ok_all else f"in progress: {line}") if checked
                                  else "in progress: not built")
+        from app.core import evidence as ev_mod
+        from app.core import turnfacts as tf_mod
+        built = ev_mod.changed_line(tf_mod.change_rows(list(chat.ws.journal or []), chat.ws.root))
+        if built:  # Stage 2.6: what the build changed, from the change journal (not the model)
+            note += f"\nChanged: {built}\n"
         resume_file = pathlib.Path(cfg["workspace"]) / ".codemitra" / "resume.md"
         resume_file.parent.mkdir(parents=True, exist_ok=True)
         resume_file.write_text(note, encoding="utf-8")
@@ -4559,6 +4564,8 @@ def _chat():
                 console.print(ui.tool_line("Stopped", ok=False, detail=turn.stop_reason))
             elif not ai_reply:
                 console.print(ui.tool_line("Empty reply", ok=False, detail="the model wrote no answer. Try again."))
+            if getattr(chat, "last_evidence", ""):  # Stage 2.6: CodeMitra's own record of the change
+                console.print(Markdown(chat.last_evidence))
             if getattr(turn, "unverified", None):  # E-110: a claim no tool result of this turn backs
                 from app.core import grounding as grounding_mod
                 console.print(ui.tool_line("Unverified", ok=False, detail=grounding_mod.warning(turn.unverified)))

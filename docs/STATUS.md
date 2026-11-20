@@ -4,7 +4,9 @@ existing MCP servers by trigger, 5 self-improvement. MongoDB (server, upload API
 
 # Status
 
-**2026-11-20 evening: Stage 2.5 loop guard DONE (committed locally; not pushed yet).** Live: the PDF feature built 2/2 with AC-1 and AC-2 really true (T2 19 steps, was 32) after E-158 (package_info named the wrong module), E-159 (no hint for a missing test file), E-160 (hints lost at fresh rounds). Kaggle stopped (17.1 h left). **Next:** 2.6 evidence report, 2.7 `codemitra status`; then Stage 2's done line (a multi-step feature from a spec, unattended, no false done).
+**2026-11-20 evening: Stage 2.6 evidence report DONE (committed locally; 2.5 + 2.6 not pushed yet).** After every change: Changed (path:lines) / Ran / Not checked, from the records; live 4/4 reports right (E-161 fixed first). Kaggle stopped (16.8 h left). **Next:** 2.7 `codemitra status`, then Stage 2's done line.
+
+**2026-11-20 evening: Stage 2.5 loop guard DONE.** Live: the PDF feature built 2/2 with AC-1 and AC-2 really true (T2 19 steps, was 32) after E-158 (package_info named the wrong module), E-159 (no hint for a missing test file), E-160 (hints lost at fresh rounds). Kaggle stopped (17.1 h left). **Next:** 2.6 evidence report, 2.7 `codemitra status`; then Stage 2's done line (a multi-step feature from a spec, unattended, no false done).
 
 **2026-11-20 afternoon: Stage 2.4 finish gate DONE; everything PUSHED to main, CI green on e63ed5c after E-157 (openpyxl, no project Python, colour codes) (no release tag yet; `codemitra update` pulls it; version still says 0.8.9, CHANGELOG "Unreleased" lists it).** One gate (no work, script not run, environment, tests failed + done claim, missing output, broken JSON, re-read of long requests) in the chat and the step runner; missing library -> needs_env, install offered, steps rerun. Live (EVALS): E-154 a benchmark-runner check installed fpdf into the system Python (uninstalled at once; runs never install now, the chat always asks), E-155 the 9B made a criterion pass on the missing library (specs missing libraries are not built now). Kaggle stopped (17.4 h left). **Next:** 2.5 loop guard, 2.6 evidence report, 2.7 `codemitra status`.
 

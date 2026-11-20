@@ -140,11 +140,17 @@ def claims(text: str, tools: list[tuple[str, bool, str]], changed: bool = False,
         out.append({"kind": kind, "text": s[:300], "verdict": verdict})
 
     for s in _sentences(text or ""):
+        if s.rstrip().endswith("?") or _ASKS.search(s):
+            continue  # Stage 2.6 live: "Fix the Streamlit app file issue so the tests pass?" asks, it claims nothing
+        if re.match(r"^[^A-Za-z]*(how|what|why|when|where)\b", s, re.I):
+            continue  # a description ("3. How the net balance formula works"), not a claim
         bare = re.sub(r"^[^A-Za-z]+", "", s)
         success = _SUCCESS.search(s)
         if success and not _NOT_YET.search(s) and not _HONEST.search(s[:success.start()]):
-            add("runs", s, "false" if tests_failed or (ran and not ran[-1]) else "true" if (tested_ok or (ran and ran[-1]))
-                else "unchecked")
+            # a command it ran decides "my script runs" (live: an unrelated failing test made a true claim false)
+            verdict = ("true" if ran[-1] else "false") if ran else \
+                ("false" if tests_failed else "true" if tested_ok else "unchecked")
+            add("runs", s, verdict)
             continue
         claim = _CHANGED.search(bare)
         if claim and not _ASKS.search(s) and not _HONEST.search(bare[:claim.start()]):

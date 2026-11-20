@@ -36,6 +36,18 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Stage 2.6 live check: the evidence report (2026-11-20, Kaggle T4, qwen3.5 9B, 4 change turns on a Trip_splitter copy with its own .venv)
+Run 2 (after F-154), each report checked against the files:
+
+| Turn | Model said | Evidence said | Right? |
+|---|---|---|---|
+| docstring | "lines 52-69" | `utils.py:53-59, 61-75` (+22 -5); 2 failed: the two Streamlit tests | yes: the changed lines of a rewritten docstring (52-76); the model's range was off |
+| README section | "Done!" | `README.md:150-167` (+18 -0); ran nothing; no test covers README | yes |
+| xlsx script + run | created and ran it | new `scripts/balances_xlsx.py` (162 lines), `balances.xlsx` made by a command, the script ran ok | yes |
+| rounding + test | "my test passed, 9 passing" | `utils.py:97-98` (+2 -2), `tests/...:83-103` (+21); 2 failed (the Streamlit tests), 9 passed | yes |
+
+Run 1 found the flaws fixed in F-154 (E-161). The 2 failing tests fail the same on an untouched copy.
+
 ## Stage 2.5 live check: the loop guard (2026-11-20, Kaggle T4, qwen3.5 9B, the PDF feature spec on a Trip_splitter copy with its own .venv and fpdf2)
 | Run | Code | Tasks | Steps | Ladder fired | Criteria after |
 |---|---|---|---|---|---|

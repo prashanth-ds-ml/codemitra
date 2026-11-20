@@ -23,6 +23,7 @@ from app.core import harness as H
 from app.core import loop as core_loop
 from app.core import signals as SIG
 from app.core import tools as T
+from app.core import evidence as EV
 from app.core import finish_gate as FG
 from app.core import turnfacts as TF
 from app.core.parse import for_model, text_tool_calls
@@ -796,6 +797,8 @@ class ChatSession:
         self.work = {"spec": "", "feature": "", "task_id": ""}  # Stage 1.2: what the turn belongs to (filled in Stage 2)
         self._used = {"skills": [], "mcp": [], "lessons": []}  # Stage 1.6, per turn
         self._gate_done: set = set()  # Stage 2.4, per turn (reset at turn start)
+        self._turn_args: list = []
+        self.last_evidence = ""
         self._snap_cache: dict = {}   # Stage 1.4: file hashes by (size, mtime), so a snapshot rereads only changes
         self._last_end_wall = 0.0     # Stage 1.7: when the last turn ended (your time = the gap to the next start)
         self._session_changed: set[str] = set()  # Stage 1.5: files changed by any turn of this session
@@ -914,6 +917,8 @@ class ChatSession:
         from app.core import runinfo
         self.rec.seen = []
         self._gate_done: set = set()  # Stage 2.4: the finish gate's checks already used this turn
+        self._turn_args: list = []    # Stage 2.6: (tool, args) of every tool row this turn
+        self.last_evidence = ""       # Stage 2.6: the evidence report of this turn (main shows it)
         self._turn_tools_s, self._model_s0 = 0.0, self.rec.model_s
         self._used = {"skills": [], "mcp": [], "lessons": []}
         self._wait_s = round(time.time() - self._last_end_wall, 1) if self._last_end_wall else None
@@ -944,6 +949,17 @@ class ChatSession:
             elif rows:
                 self._session_tests_ok = False
             self._session_changed |= {r["rel"] for r in rows}
+            if rows:  # Stage 2.6: what changed, what ran, what is not checked, from the records (not the model)
+                runs = [a for n, a in self._turn_args if n in ("run_tests", "run_command")]
+                tools_run = [t for t in self.turn_tools if t[0] in ("run_tests", "run_command")]
+                kinds = [n for n, _, _ in self.turn_tools]
+                last_change = max((i for i, n in enumerate(kinds) if n in CHANGE_TOOLS), default=-1)
+                last_run = max((i for i, n in enumerate(kinds) if n in ("run_tests", "run_command")), default=-1)
+                self.last_evidence = EV.report(rows, tools_run, found, args_of=runs,
+                                               has_tests=T.has_tests(self.ws.root),
+                                               ran_after_last_change=last_run > last_change or last_change < 0)
+                if self.last_evidence:
+                    self.rec.write("evidence", turn=self.turn_no, text=self.last_evidence)
             verdict = grounding.verdict(found)
             if text.strip():
                 tests = [ok for n, ok, _ in self.turn_tools if n == "run_tests"]
@@ -1142,6 +1158,7 @@ class ChatSession:
         if len(out) > OUTPUT_CAP:
             self.rec.tool_output(out, turn=self.turn_no, step=step, name=name)
         self.rec.write("tool", **row)
+        self._turn_args.append((name, dict(args or {})))  # Stage 2.6: what ran, for the evidence report
 
     def _run_tool(self, name: str, args: dict, plan_runner) -> tuple[str, bool]:
         if self.mode in ("plan", "read-only") and name not in READ_ONLY_TOOLS:
