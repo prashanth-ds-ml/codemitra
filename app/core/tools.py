@@ -745,6 +745,61 @@ def split_command(cmd: str) -> list[str]:
     return args
 
 
+def own_package_hint(root: Path, out: str) -> str:
+    """E-163 (live 2026-11-21): "No module named 'trip_splitter'" for the project's own src/ package, which is not
+    installed. The 9B imported it as `src.trip_splitter` (works until the package imports itself by name) and looped
+    3 rounds. Say whose package it is and how the project's tests already import it. Never suggests installing."""
+    m = re.search(r"No module named '([\w.]+)'", out or "")
+    if not m:
+        return ""
+    top = m.group(1).split(".")[0]
+    root = Path(root)
+    pkg = next((p for p in (root / "src" / top, root / top) if (p / "__init__.py").is_file()), None)
+    if pkg is None:
+        return ""
+    rel = pkg.relative_to(root).as_posix()
+    example = ""
+    for f in sorted((root / "tests").rglob("*.py")) if (root / "tests").is_dir() else []:
+        try:
+            lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for n, line in enumerate(lines, 1):
+            if "sys.path" in line and ("src" in line or "parent" in line):
+                example = f"{f.relative_to(root).as_posix()}:{n} `{line.strip()[:120]}`"
+                break
+        if example:
+            break
+    how = (f"The project's tests already do it: {example}. Put the same line (with `import sys` and "
+           "`from pathlib import Path`) at the top of your test, before the imports" if example else
+           "Add `sys.path.insert(0, str(Path(__file__).resolve().parents[1] / \"src\"))` at the top of the test, "
+           "before the imports (or the same in tests/conftest.py)") if rel.startswith("src/") else ""
+    return (f"\n\n`{top}` is this project's own package ({rel}/), not an installed library. "
+            + (f"It is not installed, so `import {top}` works only with src/ on sys.path. {how}; import it as "
+               f"`{top}.…`, never `src.{top}.…` (its own modules import `{top}` by name)." if how else
+               f"Run the tests from the project folder and import it as `{top}.…`."))
+
+
+_BARE_EXIT = re.compile(r"^>?\s*assert\s+([\w.]+)\.(exit_code|returncode)\s*==\s*0\s*$", re.M)
+
+
+def exit_code_hint(out: str) -> str:
+    """E-165 (live 2026-11-21): `assert result.exit_code == 0` failed 9 times with "assert 2 == 0" and nothing else;
+    typer's usage error (`out` was positional, the test passed `--out`) was in result.output, which the assert does
+    not show, and the step runner has no command to run the CLI by hand. Say how to see it."""
+    m = _BARE_EXIT.search(out or "")
+    if not m:
+        return ""
+    obj = m.group(1)
+    fix = (f"\n\nThis assert hides why the command failed: write it as `assert {obj}.{m.group(2)} == 0, "
+           f"{obj}.{'output' if m.group(2) == 'exit_code' else 'stderr'}` and run the test again to see the message.")
+    if m.group(2) == "exit_code" and re.search(r"assert 2 == 0", out) and re.search(r"CliRunner|typer|click", out):
+        fix += (" Exit code 2 from a Click/Typer CliRunner is a usage error: the arguments or options the test "
+                "passes do not match the command's parameters (in Typer, an option like `--out` needs "
+                "`out: str = typer.Option(..., \"--out\")`; a plain `out: str` is a positional argument).")
+    return fix
+
+
 def run_tests(ws: Workspace, command: str | None = None, extra: list[str] | None = None,
               folder: str = "") -> TestRun:
     """`folder`: run inside one project folder of the workspace (E-126), as you would run that project's tests."""
@@ -780,6 +835,8 @@ def run_tests(ws: Workspace, command: str | None = None, extra: list[str] | None
     if gone:  # E-159 (live 2026-11-20): 3 runs of a test-first task's check before its test was written
         shown += (f"\n\nThe test file `{gone.group(1)}` does not exist yet. If your task is to write it (test first), "
                   "write it now with write_file, then run it.")
+    if not ok:
+        shown += own_package_hint(ws.root, out) + exit_code_hint(out)
     if len(shown) > MAX_OUTPUT_CHARS:
         head, tail = shown[: MAX_OUTPUT_CHARS // 3], shown[-(MAX_OUTPUT_CHARS * 2 // 3):]
         shown = f"{head}\n… {len(shown) - len(head) - len(tail)} characters cut …\n{tail}"

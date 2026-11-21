@@ -61,9 +61,11 @@ class RunResult:
     changed: list[str] = field(default_factory=list)
     record_path: str = ""
     needs: str = ""  # Stage 2.4: the library the task needs installed (status "needs_env")
+    outside: list = field(default_factory=list)  # E-164: existing functions changed that the task does not name
 
     def to_json(self) -> dict:
         return {"status": self.status, "summary": self.summary, "steps": self.steps, "needs": self.needs,
+                "outside_task": [f"{p}:{line} {n}" for p, n, line in self.outside],
                 "tests_passed": bool(self.tests and self.tests.passed),
                 "tests": self.tests.summary if self.tests else "", "tokens_in": self.tokens_in,
                 "tokens_out": self.tokens_out, "seconds": round(self.seconds, 1), "changed": self.changed,
@@ -310,6 +312,7 @@ def solve(
     specs = H.apply_tools(T.TOOL_SPECS, h)
     rec = Recorder(record_path)
     rec.ctx.update(record_ctx or {})  # Stage 2.1: session / plan / task IDs on every row of a planned task
+    plan_task = bool((record_ctx or {}).get("task_id"))  # E-164: a planned task has a scope to stay inside
     t0 = time.monotonic()
     result = RunResult(status="stopped", summary="", record_path=str(record_path or ""))
     from app.core import runinfo
@@ -327,6 +330,22 @@ def solve(
     failed_finishes = empty_replies = failing_runs = 0
     declared = FG.declared_libraries(task + "\n" + context)  # Stage 2.4: libraries the task / spec name
     last_ladder = ""  # Stage 2.5: the newest ladder hint, carried into a fresh round
+    scope_asked = False  # E-164: the outside-task check refuses once per task
+    pending_note = ""
+
+    def scope_check() -> str:
+        """The outside-task note the first time a passing task changed existing code it does not name, else ""."""
+        nonlocal scope_asked
+        if scope_asked or not plan_task:
+            return ""
+        items = FG.outside_task(ws.journal[journal_start:], ws.root, task)  # the task's own text, not the notes
+        if not items:
+            return ""
+        scope_asked = True
+        rec.write("gate", check="outside_task", step=result.steps, names=[f"{p}:{line} {n}" for p, n, line in items])
+        emit(Event("note", {"text": "also changed " + ", ".join(n for _, n, _ in items) + ", which the task does "
+                                    "not name: asked to undo it or say why", "ok": False}))
+        return FG.scope_note(items)
     round_no = 1
     if ws.journal is None:
         ws.journal = []
@@ -359,6 +378,8 @@ def solve(
         result.status, result.summary = status, summary
         result.seconds = time.monotonic() - t0
         result.changed = sorted(ws.changed)
+        if status == "passed" and plan_task:  # E-164: what is still changed outside the task is reported
+            result.outside = FG.outside_task(ws.journal[journal_start:], ws.root, task)
         rec.write("end", **result.to_json())
         emit(Event("done", result.to_json()))
         return result
@@ -433,6 +454,10 @@ def solve(
                 emit(Event("tests", {"passed": run.passed, "summary": run.summary}))
                 rec.write("tests", passed=run.passed, summary=run.summary, full=run.full_path)
                 if run.passed:
+                    note = scope_check()
+                    if note:  # E-164: once, before "done": undo the change outside the task, or say why
+                        messages.append(ToolMessage(content=note, tool_call_id=tc["id"]))
+                        continue
                     messages.append(ToolMessage(content="Tests pass. Done.", tool_call_id=tc["id"]))
                     return finish_with("passed", str(args.get("summary") or text or "Tests pass."))
                 module = FG.missing_module(run.output, ws.root, declared=declared)
@@ -483,11 +508,17 @@ def solve(
                 result.tests = run
                 emit(Event("tests", {"passed": run.passed, "summary": run.summary}))
                 if run.passed:
-                    return finish_with("passed", text or f"Tests pass: {run.summary}")
+                    pending_note = scope_check()
+                    if not pending_note:
+                        return finish_with("passed", text or f"Tests pass: {run.summary}")
+                    continue
                 failing_runs += 1
             stop = guard.after(name, output, ok)
             if stop:
                 return finish_with("stopped", stop)
+        if pending_note:
+            messages.append(HumanMessage(content=pending_note))
+            pending_note = ""
         if failing_runs >= fresh_round_after:
             if round_no >= max_rounds:
                 return finish_with("failed", f"Tests still fail after {round_no} rounds "

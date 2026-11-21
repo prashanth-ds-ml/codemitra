@@ -132,3 +132,71 @@ def json_note(bad: list[tuple[str, str]]) -> str:
 
 def recheck_note(request: str) -> str:
     return RECHECK_NOTE.format(request=(request or "").strip()[:2000])
+
+
+# ── 8 outside_task (step runner): an existing function the task does not name was changed (E-164) ─────────────
+# Live 2026-11-21: T3 (a CLI command) also "fixed" optimize_settlements, which it did not name; every check stayed
+# green and the settlements came out wrong (C paid 15 of the 10 it owed). Refused once per task; then it is listed.
+
+SCOPE_NOTE = ("[CodeMitra: the tests pass, but you also changed {names}, which your task does not name. Changing "
+              "existing code outside the task can break what worked, and no test of this task checks it. Next: undo "
+              "those changes with edit_file unless the task really needs them; if it does, say why in one line, then "
+              "run_tests again.]")
+
+
+def _functions(source: str) -> dict[str, tuple[str, int]]:
+    """qualified name -> (its source, its first line) for every function and method of a Python file."""
+    import ast
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return {}
+    out: dict[str, tuple[str, int]] = {}
+
+    def walk(node, prefix=""):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                name = f"{prefix}{child.name}"
+                if not isinstance(child, ast.ClassDef):
+                    out[name] = (ast.get_source_segment(source, child) or "", child.lineno)
+                walk(child, name + ".")
+    walk(tree)
+    return out
+
+
+def outside_task(journal: list[dict], root: Path, task_text: str) -> list[tuple[str, str, int]]:
+    """(path, function, line) of every function that existed before the task and changed, unless the task names it
+    and its file is in the task's `- Files:` line (when it has one). Only the task's own text counts, not the plan's
+    shared notes (they name everything). Test files are the task's own; new functions are fine."""
+    files_line = re.search(r"^\s*-\s*Files:\s*(.+)$", task_text or "", re.M)
+    listed = {f.strip().strip("`").replace("\\", "/") for f in files_line.group(1).split(",")} if files_line else set()
+    first: dict[str, str | None] = {}
+    last: dict[str, str] = {}
+    for e in journal or []:
+        p = str(e.get("path") or "")
+        if not p.endswith(".py") or e.get("kind") != "create_file":
+            continue
+        first.setdefault(p, e.get("before") if e.get("existed") else None)
+        last[p] = e.get("after") or ""
+    out = []
+    for p, before in first.items():
+        try:
+            rel = Path(p).resolve().relative_to(Path(root).resolve()).as_posix()
+        except ValueError:
+            rel = Path(p).name
+        if before is None or rel.startswith("tests/") or Path(rel).name.startswith("test_"):
+            continue
+        old, new = _functions(before), _functions(last[p])
+        for name, (src, _) in old.items():
+            if name not in new or " ".join(new[name][0].split()) == " ".join(src.split()):
+                continue
+            if (not listed or rel in listed) and \
+                    re.search(rf"\b{re.escape(name.split('.')[-1])}\b", task_text or ""):
+                continue  # live T3 said "using optimize_settlements": named, but not its file, so still outside
+            out.append((rel, name, new[name][1]))
+    return out
+
+
+def scope_note(items: list[tuple[str, str, int]]) -> str:
+    names = ", ".join(f"`{n}` ({p}:{line})" for p, n, line in items[:4])
+    return SCOPE_NOTE.format(names=names)

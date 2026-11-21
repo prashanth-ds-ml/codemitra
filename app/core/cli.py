@@ -67,6 +67,10 @@ def cmd_solve(task: str = "", *, test: str = "python -m pytest -q", plan: str = 
     model = model or roles.resolve("builder", cfg)[0]  # codemitra solve = the builder role (D-051)
     num_ctx = roles.context_for(model, cfg)              # its maximum context for now (D-052)
     # tests/ is read-only so the builder cannot cheat; a tests-first plan has CodeMitra write its own tests (night run)
+    if plan and not write_tests:
+        from app.core import specs as specs_mod
+        # E-162: a spec's tasks write their criteria's tests first (fail-first), so its tests/ cannot be read-only
+        write_tests = bool(specs_mod.parse(Path(plan).read_text(encoding="utf-8")).criteria)
     ws = Workspace(Path(workspace), test_command=test, **({"read_only": ()} if write_tests else {}))
     from app.core import store
     store.note_project(ws.root)  # the dashboard reads every folder CodeMitra ran in (D-041)
@@ -82,12 +86,19 @@ def cmd_solve(task: str = "", *, test: str = "python -m pytest -q", plan: str = 
     if plan:
         plan_text = Path(plan).read_text(encoding="utf-8")
         from app.core import specs as specs_mod
-        spec = specs_mod.parse(plan_text)  # Stage 2.3: a spec (it has criteria) runs fail-first, unattended too
+        from app.core import spec_status as ss_mod
+        fid = ss_mod.feature_of(plan)
+        spec = specs_mod.parse(plan_text, fid)  # Stage 2.3: a spec (it has criteria) runs fail-first, unattended too
+        ctx = {"plan": Path(plan).name, **({"spec": Path(plan).name, "feature": fid} if fid else {})}
         out = run_plan(plan_text, ws, llm, full_test_command=test, max_steps=max_steps, on_event=printer,
-                       record_dir=runs, num_ctx=num_ctx, fail_first=bool(spec.criteria))
+                       record_dir=runs, num_ctx=num_ctx, fail_first=bool(spec.criteria), record_ctx=ctx)
         if spec.criteria:
             out["criteria"] = specs_mod.verify(spec, ws)
             out["criteria_line"] = specs_mod.verdict_line(out["criteria"])
+            if fid:  # Stage 2.7: an unattended build counts in `codemitra status` like a chat build
+                ss_mod.record_criteria(ws.root, Path(plan).name, fid, out["criteria"], source="solve --plan")
+                built = all(r["status"] in ("passed", "you") for r in out["criteria"])
+                specs_mod.set_status(Path(plan), f"{'built' if built else 'in progress'}: {out['criteria_line']}")
             if not as_json:
                 console.print(Text(f"  criteria: {out['criteria_line']}", style="m.tool"))
         runs.mkdir(parents=True, exist_ok=True)

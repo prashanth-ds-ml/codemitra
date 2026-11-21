@@ -263,8 +263,19 @@ def _print_phase0_models(cwd: str | None = None, show_all: bool = False) -> None
             console.print(f"[dim]{hidden} more installed model(s) cannot run CodeMitra; `codemitra models --all` shows why.[/dim]")
 
 
-def cmd_status(cwd: str | None = typer.Option(None, "--cwd", help="Start path for project root detection.")) -> None:
-    """Show the current workspace and Ollama status."""
+def cmd_status(cwd: str | None = typer.Option(None, "--cwd", help="Start path for project root detection."),
+               check: bool = typer.Option(False, "--check", help="Run every feature's criteria checks now (no model).")
+               ) -> None:
+    """Where the project's features stand (specs/, Stage 2.7), then the workspace and Ollama status."""
+    from app.core import spec_status as ss_mod
+    workspace = _resolve_phase0_workspace(cwd)
+    if check:
+        n = ss_mod.check_now(workspace, on_feature=lambda fid, title: console.print(
+            Text(f"  checking {fid} {title} …", style="m.faint")))
+        console.print(Text(f"  checked {n} feature(s)", style="m.tool"))
+    if (workspace / "specs").is_dir() or check:
+        console.print(ss_mod.render(ss_mod.collect(workspace)), markup=False, highlight=False)
+        console.print()
     _print_phase0_status(cwd)
 
 
@@ -3804,6 +3815,9 @@ def _chat():
                 if answers:
                     chat.rec.write("criteria_answers", spec=pathlib.Path(path).name, feature=spec.feature,
                                    answers=answers, author="user")
+                from app.core import spec_status as ss_mod  # Stage 2.7: the history `codemitra status` reads
+                ss_mod.record_criteria(pathlib.Path(cfg["workspace"]), pathlib.Path(path).name, spec.feature,
+                                       checked, answers, source="chat build")
             mine_open = [r for r in checked if r["status"] == "you" and r["id"] not in answers]
             if mine_open:  # never counted as verified
                 note += "You check (not verified by CodeMitra):\n" + "\n".join(
@@ -5005,10 +5019,17 @@ def _compact(
         )
     console.print(ui.tool_line("Compacted", detail="the conversation was summarised to free context"))
     console.print(ui.detail_block(summary, max_lines=20))
-    return [
+    out = [
         SystemMessage(content=system_prompt),
         HM(content=f"[Compacted context from previous turns]\n\n{summary}"),
     ]
+    from app.core import spec_status as ss_mod
+    active = ss_mod.active_plan(workspace) if workspace else ""
+    if active:  # Stage 2 (Mingbird): the plan goes back word for word, not through the model's summary
+        out.append(HM(content=active))
+        if rec is not None:
+            rec.write("compact_plan", chars=len(active))
+    return out
 
 
 def _print_help(extra_commands=None):
