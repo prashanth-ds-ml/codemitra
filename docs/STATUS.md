@@ -4,6 +4,8 @@ existing MCP servers by trigger, 5 self-improvement. MongoDB (server, upload API
 
 # Status
 
+**2026-11-21: STAGE 2 DONE (committed locally; 2.5, 2.6 and this are NOT pushed).** 2.7: `codemitra status [--check]` (features, criteria, tasks, drift, outside-task changes, unplanned, cost; F-155) and the plan put back word for word after compaction (F-157). Done line: a 3-task spec built unattended on the 9B (Kaggle), 3/3 with AC-1..3 true and nothing outside the tasks changed, on run 4 (EVALS). Runs 1-3 found and fixed E-162 (unattended spec builds could not write tests), E-163 (own src/ package imports), E-164 (run 2 "passed" but broke optimize_settlements: new finish-gate check `outside_task`), E-165 (a hidden typer usage error). Kaggle stopped (29.1 h left until Sat 28 Nov). Name check: ~55 small CodeMitra repos on GitHub, no trademark found; keep the name. **Next:** the user's go to push (and maybe tag v0.9.0, release check first); then Stage 3 (specs as the benchmark).
+
 **2026-11-20 evening: Stage 2.6 evidence report DONE (committed locally; 2.5 + 2.6 not pushed yet).** After every change: Changed (path:lines) / Ran / Not checked, from the records; live 4/4 reports right (E-161 fixed first). Kaggle stopped (16.8 h left). **Next:** 2.7 `codemitra status`, then Stage 2's done line.
 
 **2026-11-20 evening: Stage 2.5 loop guard DONE.** Live: the PDF feature built 2/2 with AC-1 and AC-2 really true (T2 19 steps, was 32) after E-158 (package_info named the wrong module), E-159 (no hint for a missing test file), E-160 (hints lost at fresh rounds). Kaggle stopped (17.1 h left). **Next:** 2.6 evidence report, 2.7 `codemitra status`; then Stage 2's done line (a multi-step feature from a spec, unattended, no false done).

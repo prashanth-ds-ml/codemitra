@@ -44,3 +44,13 @@ materially. Details live in [PROGRESS_LOG.md](PROGRESS_LOG.md) and [EVALS.md](EV
 - **Direction set by the user (D-082):** CodeMitra must learn by itself first; a frontier coach comes in only when it
   is measurably stuck, and then only guides.
 
+### 2026-11-18 to 11-21 · Stage 1 and 2: logs, specs, one finish gate, an honest unattended build
+- **Trigger:** the user asked for "proper spec driven development" and traces that answer every question.
+- **What worked:** a live check after every step, on the 9B, with the failure traced to its cause in the records
+  before any fix; each run found one CodeMitra gap and the next run showed whether its fix held (4 runs for the done
+  line). Mingbird's finish gate and loop ladder ported with credit.
+- **What did not:** run 2 met every criterion and still broke an existing function the task only had to call; the
+  checks and gates were all green. Only reading the diff found it (L-062). My first scope rule would have let that
+  exact case through (the task text named the function); the live case became the test.
+- **Built:** `codemitra trace`, specs with fail-first criteria, one finish gate (now with `outside_task`), the loop
+  guard, the evidence report, `codemitra status`.

@@ -36,6 +36,25 @@ Method and every result, whatever it shows. Raw results live in `results/` and a
 - **Metrics:** pass rate, fixed prompt tokens, broken tool calls, turns, wall time; from M3: frontier tokens, ₹, GPU Wh
 - **Rules:** same tasks, same model, same context and timeout for every agent; runs repeated N times; failures kept
 
+## Stage 2 done-line check: one feature spec, 3 tasks, unattended (2026-11-21, Kaggle T4, qwen3.5 9B 256K, `codemitra solve --plan specs/F-001-...` on a Trip_splitter copy with its own .venv)
+Spec F-001 (trip summary + settlements CSV): AC-1 `settlements_to_csv`, AC-2 `person_summary`, AC-3 a typer
+`summary` command (T3 needs T1, T2), AC-4 you check. Every run: each check failed first (fail-first). The 2 failing
+tests in the full suite are the Streamlit ones that fail the same on an untouched copy.
+
+| Run | Code | Tasks | Steps T1 / T2 / T3 | Criteria after | What happened | Fixed by |
+|---|---|---|---|---|---|---|
+| 1 | Stage 2.7 + F-156 | 2/3 | - / - / 23 (3 rounds, rolled back) | AC-1 ✓ AC-2 ✓ AC-3 ✗ | the 9B imported the project's own src/ package as `src.trip_splitter`; 9 runs of "No module named 'trip_splitter'", no hint (E-163) | F-158 |
+| 2 | + F-158 | 3/3 | 5 / 7 / 29 | AC-1..3 ✓ | **looked done, was not:** T3 also rewrote the existing `optimize_settlements` (`- amt` -> `+ amt`); with A +15, B +5, C -10, D -10, C paid 15 and D 5. No test covers it, every gate green (E-164). Its tests also wrote files into tests/ | F-159 |
+| 3 | + F-159 | 2/3 | 8 / 4 / 22 (rolled back) | AC-3 ✗ | T3: `out: str` (positional) vs the test's `--out`: typer exit 2; `assert result.exit_code == 0` hid the message; 9 runs of the same test without a change (E-165) | F-160 |
+| 4 | + F-160 | **3/3** | 6 / 10 / 14 | **AC-1 ✓ AC-2 ✓ AC-3 ✓** AC-4 yours | the exit-code hint fired twice in T3, then it passed; 299 lines added, **0 existing lines changed**; no stray files; `outside_task` empty for all 3 | - |
+
+Run 4 checked by hand: the command (through the project's `trip-splitter` entry point) on A 40 (all four), B 20
+(B and C) prints A +30, B 0, C -20, D -10 and writes `C,A,20.00` / `D,A,10.00`: right. My spec's AC-3 text named
+`python -m trip_splitter.cli`, which never ran anything (cli.py has no `__main__` guard, before this feature too); its
+check used CliRunner, so the check did not run the command the criterion names (a spec-writing slip, L-063).
+`codemitra status` on run 1 and run 4 matched the records (run 4: 1 feature done, 3/3 tasks first try, 235K tokens,
+5 min). One run per code version: a direction, not a rate (rates are Stage 3). Kaggle 0.8 h.
+
 ## Stage 2.6 live check: the evidence report (2026-11-20, Kaggle T4, qwen3.5 9B, 4 change turns on a Trip_splitter copy with its own .venv)
 Run 2 (after F-154), each report checked against the files:
 

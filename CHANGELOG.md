@@ -12,6 +12,12 @@ All notable changes, newest first. Versions follow the milestones in [docs/PLAN.
 - `package_info` names the module a package really installs (fpdf2 -> `import fpdf`); a missing test file says "write it first" (E-158, E-159).
 - **An evidence report after every change (Stage 2.6):** CodeMitra prints, from its own records (not the model's words), what changed (file:lines), what ran and its result, and what nothing checked (a failing test named, a file no test covers, a claim with no run behind it).
 
+- **`codemitra status` shows where your features stand (Stage 2.7):** with a `specs/` folder it lists features (done / in progress / not started), criteria (passing / failing / you check), tasks (first try, re-planned, needs help, waiting for an install), drift (a criterion that passed before and fails now), code changed outside its task, chat changes outside any feature, and tokens and time; `--check` runs every criterion's check now (no model). The workspace / Ollama table still follows.
+- **The plan survives compaction:** after the chat compacts, the active feature spec and the resume note come back word for word, not through the model's summary.
+- **Unattended spec builds work:** `codemitra solve --plan specs/F-nnn-...md` may write the spec's own tests (E-162), tags its records with the feature and updates the spec's Status line.
+- **A task that changes code it was not asked to change is stopped once (E-164):** before "done", a planned task that rewrote an existing function its task does not name (with its file) is asked to undo it or say why; what stays is listed in the result and in `codemitra status`.
+- Two hints for the 9B from live runs: a missing module that is the project's own src/ package says how the project's tests import it (E-163); a bare `assert result.exit_code == 0` says to show the output, and exit 2 from a Click/Typer runner is named a usage error (E-165).
+
 ## [0.8.9] - 2026-11-17 · Long files no longer stop the turn
 - **A long file no longer looks like a stuck model (E-141):** asked to save a long analysis as a markdown file, the
   model writes the whole file as one tool call, and Ollama sends a tool call only when it is complete. On a slow
